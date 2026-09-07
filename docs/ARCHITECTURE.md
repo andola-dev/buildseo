@@ -162,13 +162,13 @@ backend/
 │   │   └── submission/             # SubmissionProvider implementations
 │   ├── audit/                      # audit log service
 │   └── workers/                    # TaskQueue protocol, registry, runner, tasks
-├── migrations/                     # Alembic (versions/ 001…017)
+├── migrations/                     # Alembic (versions/ 0001…0018)
 ├── tests/
 │   ├── unit/                       # pure logic: crypto, tokens, scoring, domains
 │   ├── integration/                # DB, repositories, RLS, tenant isolation
 │   ├── api/                        # httpx ASGI transport end-to-end
 │   └── security/                   # cross-tenant, RBAC, token, leakage tests
-├── scripts/                        # seed, create_app_role, dev helpers
+├── scripts/                        # seed.py — permission catalog, never secrets
 ├── docker/postgres/init/           # app-role bootstrap for compose
 ├── Dockerfile
 ├── docker-compose.yml
@@ -769,7 +769,7 @@ caches it on the request principal, and raises `AuthorizationError` (403) on a m
 `publisher.{read,create,update,delete}`, `publisher.discover`, `publisher.qualify`,
 `opportunity.{read,create,update,delete}`, `submission.{read,create,update,delete}`,
 `submission.approve`, `submission.verify`, `credential.{read,create,update,delete}`,
-`integration.{read,create,update,delete}`, `ai.generate`, `ai.usage.read`, `audit.read`,
+`integration.{read,create,update,delete}`, `ai.generate`, `ai.usage_read`, `audit.read`,
 `job.{read,create}`.
 
 ### 7.2 Default roles
@@ -854,136 +854,308 @@ output is persisted, in `generated_contents`.
 
 ## 9. API Endpoint Inventory
 
-All under `/api/v1`. Every response uses the `data`/`meta` envelope; every error uses
-the `error` envelope. `A` = requires access token, `T` = requires active tenant.
+92 endpoints: 3 unauthenticated health probes plus 89 under `/api/v1`.
+Every success response uses the `data`/`meta` envelope and every failure the
+`error` envelope, so a client can branch on shape alone.
+
+`A` = requires an access token. `T` = requires an active tenant context
+(`X-Tenant-ID`, or the token's `tid` claim, re-validated against membership on
+every request). Authorization is always by permission code; role names are never
+compared anywhere in the codebase.
+
+`tests/api/test_openapi_contract.py` fails if any route is missing a summary, a
+description, a tag or the error responses a caller has to handle, so this table
+cannot drift far from the code without a test going red.
+
+### Health (unauthenticated)
 
 | Method | Path | Auth | Permission |
 |---|---|---|---|
-| GET | `/health`, `/health/live`, `/health/ready` | – | – |
+| GET | `/health` | – | – |
+| GET | `/health/live` | – | – |
+| GET | `/health/ready` | – | – |
+
+### Authentication
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
 | POST | `/auth/register` | – | – |
 | POST | `/auth/login` | – | – |
 | POST | `/auth/refresh` | – | – |
 | POST | `/auth/logout` | A | – |
 | POST | `/auth/select-tenant` | A | – |
 | GET | `/auth/sessions` | A | – |
-| DELETE | `/auth/sessions/{id}` | A | – |
+| DELETE | `/auth/sessions/{session_id}` | A | – |
+
+### The authenticated user
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
 | GET | `/me` | A | – |
 | PATCH | `/me` | A | – |
 | POST | `/me/password` | A | – |
 | GET | `/me/tenants` | A | – |
+
+### Workspaces and membership
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
 | GET | `/tenants` | A | – |
 | POST | `/tenants` | A | – |
 | GET | `/tenants/{tenant_id}` | A+T | `tenant.read` |
 | PATCH | `/tenants/{tenant_id}` | A+T | `tenant.update` |
 | GET | `/tenants/{tenant_id}/members` | A+T | `user.read` |
 | POST | `/tenants/{tenant_id}/members` | A+T | `user.create` |
-| PATCH | `/tenants/{tenant_id}/members/{id}` | A+T | `user.update` |
-| DELETE | `/tenants/{tenant_id}/members/{id}` | A+T | `user.delete` |
+| PATCH | `/tenants/{tenant_id}/members/{membership_id}` | A+T | `user.update` |
+| DELETE | `/tenants/{tenant_id}/members/{membership_id}` | A+T | `user.delete` |
+
+### Users
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
 | GET | `/users` | A+T | `user.read` |
-| GET | `/users/{id}` | A+T | `user.read` |
+| GET | `/users/{user_id}` | A+T | `user.read` |
+
+### Roles and permissions
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/permissions` | A+T | `permission.read` |
 | GET | `/roles` | A+T | `role.read` |
 | POST | `/roles` | A+T | `role.create` |
-| GET | `/roles/{id}` | A+T | `role.read` |
-| PATCH | `/roles/{id}` | A+T | `role.update` |
-| DELETE | `/roles/{id}` | A+T | `role.delete` |
-| GET | `/permissions` | A+T | `permission.read` |
-| GET/POST | `/client-websites` | A+T | `client_website.read` / `.create` |
-| GET/PATCH/DELETE | `/client-websites/{id}` | A+T | `client_website.*` |
-| GET/POST | `/campaigns` | A+T | `campaign.read` / `.create` |
-| GET/PATCH/DELETE | `/campaigns/{id}` | A+T | `campaign.*` |
-| GET/POST | `/publishers` | A+T | `publisher.read` / `.create` |
-| GET/PATCH/DELETE | `/publishers/{id}` | A+T | `publisher.*` |
-| POST | `/publishers/discover` | A+T | `publisher.discover` |
-| POST | `/publishers/{id}/qualify` | A+T | `publisher.qualify` |
+| GET | `/roles/{role_id}` | A+T | `role.read` |
+| PATCH | `/roles/{role_id}` | A+T | `role.update` |
+| DELETE | `/roles/{role_id}` | A+T | `role.delete` |
+
+### Client websites
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/client-websites` | A+T | `client_website.read` |
+| POST | `/client-websites` | A+T | `client_website.create` |
+| GET | `/client-websites/{website_id}` | A+T | `client_website.read` |
+| PATCH | `/client-websites/{website_id}` | A+T | `client_website.update` |
+| DELETE | `/client-websites/{website_id}` | A+T | `client_website.delete` |
+
+### Campaigns
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/campaigns` | A+T | `campaign.read` |
+| POST | `/campaigns` | A+T | `campaign.create` |
+| GET | `/campaigns/{campaign_id}` | A+T | `campaign.read` |
+| PATCH | `/campaigns/{campaign_id}` | A+T | `campaign.update` |
+| DELETE | `/campaigns/{campaign_id}` | A+T | `campaign.delete` |
+| GET | `/campaigns/{campaign_id}/stats` | A+T | `campaign.read` |
+
+### Publishers (discovery and qualification)
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/publishers` | A+T | `publisher.read` |
+| POST | `/publishers` | A+T | `publisher.create` |
+| GET | `/publishers/discovery-providers` | A+T | `publisher.read` |
 | GET | `/publishers/discovery-runs` | A+T | `publisher.read` |
-| GET/POST | `/opportunities` | A+T | `opportunity.read` / `.create` |
-| GET/PATCH | `/opportunities/{id}` | A+T | `opportunity.*` |
-| POST | `/opportunities/{id}/qualify` | A+T | `opportunity.update` |
-| POST | `/opportunities/{id}/select` | A+T | `opportunity.update` |
-| POST | `/opportunities/{id}/reject` | A+T | `opportunity.update` |
-| POST | `/opportunities/{id}/generate-content` | A+T | `ai.generate` |
-| GET | `/opportunities/{id}/content` | A+T | `opportunity.read` |
-| POST | `/opportunities/{id}/content/{cid}/review` | A+T | `opportunity.update` |
-| GET/POST | `/submissions` | A+T | `submission.read` / `.create` |
-| GET/PATCH | `/submissions/{id}` | A+T | `submission.*` |
-| POST | `/submissions/{id}/approve` | A+T | `submission.approve` |
-| POST | `/submissions/{id}/execute` | A+T | `submission.update` |
-| POST | `/submissions/{id}/verify` | A+T | `submission.verify` |
-| POST | `/submissions/{id}/transition` | A+T | `submission.update` |
-| GET/POST | `/credentials` | A+T | `credential.read` / `.create` |
-| GET/PATCH/DELETE | `/credentials/{id}` | A+T | `credential.*` |
-| GET/PUT | `/ai/configs` | A+T | `integration.read` / `.update` |
-| GET | `/ai/usage` | A+T | `ai.usage.read` |
+| POST | `/publishers/discover` | A+T | `publisher.discover` |
+| GET | `/publishers/{publisher_id}` | A+T | `publisher.read` |
+| PATCH | `/publishers/{publisher_id}` | A+T | `publisher.update` |
+| DELETE | `/publishers/{publisher_id}` | A+T | `publisher.delete` |
+| POST | `/publishers/{publisher_id}/qualify` | A+T | `publisher.qualify` |
+| POST | `/publishers/{publisher_id}/qualify-async` | A+T | `publisher.qualify` |
+
+### Opportunities and generated content
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/opportunities` | A+T | `opportunity.read` |
+| POST | `/opportunities` | A+T | `opportunity.create` |
+| GET | `/opportunities/state-machine` | A+T | `opportunity.read` |
+| GET | `/opportunities/{opportunity_id}` | A+T | `opportunity.read` |
+| PATCH | `/opportunities/{opportunity_id}` | A+T | `opportunity.update` |
+| DELETE | `/opportunities/{opportunity_id}` | A+T | `opportunity.delete` |
+| POST | `/opportunities/{opportunity_id}/qualify` | A+T | `opportunity.update` |
+| POST | `/opportunities/{opportunity_id}/select` | A+T | `opportunity.update` |
+| POST | `/opportunities/{opportunity_id}/reject` | A+T | `opportunity.update` |
+| POST | `/opportunities/{opportunity_id}/transition` | A+T | `opportunity.update` |
+| POST | `/opportunities/{opportunity_id}/generate-content` | A+T | `ai.generate` |
+| GET | `/opportunities/{opportunity_id}/content` | A+T | `opportunity.read` |
+| POST | `/opportunities/{opportunity_id}/content/{content_id}/review` | A+T | `opportunity.update` |
+
+### Submissions (approval-gated)
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/submissions` | A+T | `submission.read` |
+| POST | `/submissions` | A+T | `submission.create` |
+| GET | `/submissions/state-machine` | A+T | `submission.read` |
+| GET | `/submissions/review-queue` | A+T | `submission.read` |
+| GET | `/submissions/{submission_id}` | A+T | `submission.read` |
+| PATCH | `/submissions/{submission_id}` | A+T | `submission.update` |
+| DELETE | `/submissions/{submission_id}` | A+T | `submission.delete` |
+| POST | `/submissions/{submission_id}/submit-for-review` | A+T | `submission.update` |
+| POST | `/submissions/{submission_id}/approve` | A+T | `submission.approve` |
+| POST | `/submissions/{submission_id}/execute` | A+T | `submission.update` |
+| POST | `/submissions/{submission_id}/verify` | A+T | `submission.verify` |
+| POST | `/submissions/{submission_id}/verify-async` | A+T | `submission.verify` |
+| POST | `/submissions/{submission_id}/transition` | A+T | `submission.update` |
+
+### BYOK credentials
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/credentials` | A+T | `credential.read` |
+| POST | `/credentials` | A+T | `credential.create` |
+| GET | `/credentials/{credential_id}` | A+T | `credential.read` |
+| PATCH | `/credentials/{credential_id}` | A+T | `credential.update` |
+| DELETE | `/credentials/{credential_id}` | A+T | `credential.delete` |
+| POST | `/credentials/{credential_id}/verify` | A+T | `credential.update` |
+
+### AI configuration and usage
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
+| GET | `/ai/configs` | A+T | `integration.read` |
+| PUT | `/ai/configs` | A+T | `integration.update` |
+| DELETE | `/ai/configs/{config_id}` | A+T | `integration.delete` |
+| GET | `/ai/usage` | A+T | `ai.usage_read` |
+| GET | `/ai/usage/summary` | A+T | `ai.usage_read` |
+
+### Audit trail
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
 | GET | `/audit-logs` | A+T | `audit.read` |
+
+### Background jobs
+
+| Method | Path | Auth | Permission |
+|---|---|---|---|
 | GET | `/jobs` | A+T | `job.read` |
+| GET | `/jobs/task-types` | A+T | `job.read` |
+| GET | `/jobs/{job_id}` | A+T | `job.read` |
 
 Collections accept `page`, `page_size`, `sort`, `order`, `q` (search) and
 resource-specific filters (`status`, `pricing_type`, `campaign_id`, `country`, …).
+Sort fields are validated against a per-resource allow-list, so an unrecognised
+field is a 422 rather than a silent fallback to some other ordering.
+
+Endpoints that create a resource accept an optional `Idempotency-Key` header:
+replaying the same key returns the original response instead of creating a
+duplicate, and reusing one key with a different body is a 409.
 
 ---
 
-## 10. Submission State Machine
+## 10. State Machines
 
-Opportunity lifecycle:
+Both lifecycles are declarative transition tables (`app/opportunities/workflow.py`,
+`app/submissions/workflow.py`) rather than conditionals spread through the
+services. Three reasons that matters:
+
+* the legal moves are reviewable in one place, which is what a workflow with a
+  human approval gate needs;
+* `GET /opportunities/state-machine` and `GET /submissions/state-machine`
+  publish the tables, so a client renders exactly the actions the backend will
+  accept;
+* an illegal move is one `InvalidStateTransitionError` (409) instead of a
+  subtly wrong state written by a code path nobody checked.
+
+The diagrams below are the tables, edge for edge.
+
+### Opportunity lifecycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> DISCOVERED
     DISCOVERED --> QUALIFYING
+    DISCOVERED --> REJECTED
     QUALIFYING --> QUALIFIED
     QUALIFYING --> REJECTED
     QUALIFIED --> SELECTED
     QUALIFIED --> REJECTED
+    QUALIFIED --> EXPIRED
     SELECTED --> READY
+    SELECTED --> QUALIFIED : de-selected from the campaign
     SELECTED --> REJECTED
     READY --> SUBMITTED
     READY --> REJECTED
+    READY --> EXPIRED
     SUBMITTED --> PUBLISHED
     SUBMITTED --> FAILED
-    FAILED --> READY
-    QUALIFIED --> EXPIRED
-    READY --> EXPIRED
+    FAILED --> READY : retry
+    FAILED --> REJECTED
     PUBLISHED --> [*]
+    REJECTED --> [*]
+    EXPIRED --> [*]
 ```
 
-Submission lifecycle — the human-in-the-loop gate is `PENDING_APPROVAL → SUBMITTED`:
+`PUBLISHED`, `REJECTED` and `EXPIRED` are terminal. A submission may only be
+prepared from `SELECTED` or `READY`.
+
+### Submission lifecycle
+
+The human-in-the-loop gate is `PENDING_APPROVAL → SUBMITTED`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> READY
-    READY --> IN_PROGRESS : prepare (AI drafts content)
+    READY --> IN_PROGRESS : prepare (AI drafts listing copy)
+    READY --> REJECTED
+    READY --> FAILED
     IN_PROGRESS --> PENDING_APPROVAL : content ready for review
+    IN_PROGRESS --> REJECTED
+    IN_PROGRESS --> FAILED
     PENDING_APPROVAL --> IN_PROGRESS : changes requested
-    PENDING_APPROVAL --> SUBMITTED : human approves + execute
-    PENDING_APPROVAL --> REJECTED : human rejects
+    PENDING_APPROVAL --> SUBMITTED : a person approves, then executes
+    PENDING_APPROVAL --> REJECTED : a person rejects
     SUBMITTED --> VERIFICATION_PENDING : awaiting publication
     SUBMITTED --> PUBLISHED : publisher confirmed
     SUBMITTED --> FAILED
     VERIFICATION_PENDING --> PUBLISHED
     VERIFICATION_PENDING --> FAILED
-    PUBLISHED --> VERIFIED : link found on live page
-    PUBLISHED --> FAILED : link missing/removed
+    PUBLISHED --> VERIFIED : target link found on the live page
+    PUBLISHED --> VERIFICATION_PENDING : re-check scheduled
+    PUBLISHED --> FAILED : link missing or removed
     FAILED --> READY : retry
-    REJECTED --> [*]
     VERIFIED --> [*]
+    REJECTED --> [*]
 ```
 
-Rules enforced by `SubmissionWorkflow` (a declarative transition table, not scattered
-`if`s):
+`VERIFIED` and `REJECTED` are terminal; `FAILED` is the one non-terminal
+dead-end, and only because a retry starts a fresh attempt from `READY`.
 
-1. Transitions not in the table raise `SubmissionError` (409).
-2. A submission cannot exist for an opportunity whose publisher is not
-   `pricing_type = FREE` — checked in the service **and** guarded by a DB trigger on
-   the submission path.
-3. `SUBMITTED` requires an approval record (`approved_by_user_id`, `approved_at`) set
-   by a caller holding `submission.approve`.
-4. Automated form submission is opt-in per publisher (`submission_method = FORM`) and
-   the `FormSubmissionProvider` **refuses** any target that presents a CAPTCHA,
-   an anti-bot challenge, or a `robots.txt`/ToS restriction — it returns
-   `BLOCKED_REQUIRES_MANUAL` and the workflow falls back to `ManualSubmission`.
-   No CAPTCHA solving, no anti-bot evasion, ever.
-5. Verification is an abstraction (`LinkVerifier`) that fetches the submitted URL and
-   looks for the target link; it never mutates publisher state directly.
+### Rules that hold regardless of the caller
+
+1. **Transitions outside the table are refused.** 409
+   `INVALID_STATE_TRANSITION`. `SUBMITTED` is unreachable from `READY`: the
+   only edge into it starts at `PENDING_APPROVAL`.
+2. **FREE publishers only.** A submission cannot exist for an opportunity whose
+   publisher is not `pricing_type = FREE`. Checked in `SubmissionService` *and*
+   by the `enforce_submission_free_only` trigger (revision `0013`). The trigger
+   is deliberately **not** `SECURITY DEFINER`, so it runs under the caller's own
+   RLS and fails closed on an opportunity the caller cannot see rather than
+   assuming `FREE`.
+3. **Nothing is sent without a recorded approval.** Reaching `SUBMITTED`,
+   `PUBLISHED`, `VERIFICATION_PENDING` or `VERIFIED` requires both
+   `approved_by_user_id` and `approved_at`, set by a caller holding
+   `submission.approve` — enforced by
+   `ck_submissions_submitted_requires_approval`, so it holds even for a direct
+   SQL update. Editing a submission after approval clears the approval, so the
+   content that was signed off is the content that is sent.
+4. **One live submission per opportunity.** A partial unique index
+   (`uq_submissions_tenant_id_opportunity_id_live`) excludes `REJECTED` and
+   `FAILED`, so a failed attempt can be retried with a fresh row while the
+   history survives.
+5. **No automatic delivery in this MVP.** `FormSubmissionProvider` pre-flights a
+   target and is constructed with `allow_automatic_submission=False`, so it
+   always returns `BLOCKED_REQUIRES_MANUAL` and a person completes the
+   submission. It stops outright on a CAPTCHA, a login wall, an anti-bot
+   challenge or terms prohibiting automation, and records which of those it
+   found. **No CAPTCHA solving, no anti-bot evasion, no circumvention of
+   publisher restrictions** — these are product boundaries, not unfinished
+   work.
+6. **Verification is an abstraction.** `LinkVerifier` fetches the submitted URL
+   and looks for the target link, recording the HTTP status, whether the link
+   was found and the `rel` attribute observed. It never mutates publisher state.
 
 ---
 
@@ -993,26 +1165,26 @@ Alembic only; one concern per revision, each with a working `downgrade`.
 
 | # | Revision | Contents |
 |---|---|---|
-| 001 | `initial_extensions` | `pgcrypto`, `citext`, `app_current_tenant_id()`, `app_current_user_id()`, `set_updated_at()` trigger fn |
-| 002 | `users` | users table + indexes |
-| 003 | `tenants` | tenants table |
-| 004 | `memberships` | tenant_memberships |
-| 005 | `permissions` | global permission catalog |
-| 006 | `roles` | per-tenant roles |
-| 007 | `rbac_links` | role_permissions, membership_roles |
-| 008 | `refresh_sessions` | session/token-family store |
-| 009 | `client_websites` | client websites |
-| 010 | `campaigns` | campaigns (+ `free_only` MVP check) |
-| 011 | `publishers` | publishers, discovery_runs |
-| 012 | `opportunities` | opportunities |
-| 013 | `submissions` | submissions, generated_contents (+ FREE-only trigger) |
-| 014 | `credentials` | credentials, tenant_ai_configs |
-| 015 | `ai_usage` | ai_usage_records |
-| 016 | `audit_jobs_idempotency` | audit_logs, jobs, idempotency_keys |
-| 017 | `rls_policies` | ENABLE + FORCE RLS and policies on every tenant-owned table |
-| 018 | `indexes_and_grants` | composite/partial indexes, grants to the app role |
+| 0001 | `initial_extensions` | `pgcrypto`, `citext`, `app_current_tenant_id()`, `app_current_user_id()`, `set_updated_at()` trigger fn |
+| 0002 | `users` | users table + indexes |
+| 0003 | `tenants` | tenants table |
+| 0004 | `memberships` | tenant_memberships |
+| 0005 | `permissions` | global permission catalog |
+| 0006 | `roles` | per-tenant roles |
+| 0007 | `rbac_links` | role_permissions, membership_roles |
+| 0008 | `refresh_sessions` | session/token-family store |
+| 0009 | `client_websites` | client websites |
+| 0010 | `campaigns` | campaigns (+ `free_only` MVP check) |
+| 0011 | `publishers` | publishers, discovery_runs |
+| 0012 | `opportunities` | opportunities |
+| 0013 | `submissions` | submissions, generated_contents (+ FREE-only trigger) |
+| 0014 | `credentials` | credentials, tenant_ai_configs |
+| 0015 | `ai_usage` | ai_usage_records |
+| 0016 | `audit_jobs_idempotency` | audit_logs, jobs, idempotency_keys |
+| 0017 | `rls_policies` | ENABLE + FORCE RLS and policies on every tenant-owned table |
+| 0018 | `indexes_and_grants` | composite/partial indexes, grants to the app role |
 
-Rules: no manual production DDL; every tenant-owned table gets its RLS in 017 so the
+Rules: no manual production DDL; every tenant-owned table gets its RLS in 0017 so the
 policy set is reviewable in one place; grants are applied to a configurable role name
 (`DB_APP_ROLE`) and skipped if the role is absent, so the same migration runs in CI,
 dev and production.
@@ -1023,15 +1195,17 @@ dev and production.
 
 | Suite | Scope | How |
 |---|---|---|
-| `tests/unit` | password hashing & policy, JWT encode/decode/expiry, refresh rotation logic, envelope encryption/decryption + AAD tamper, domain normalization, scoring, qualification rules, submission state machine, pagination | pure functions, no DB |
-| `tests/integration` | repositories, transactions, unique constraints, idempotency, task queue claim semantics, seed correctness | real PostgreSQL, per-test transaction rollback |
-| `tests/security` | **RLS**: cross-tenant read/update/delete/insert/ID-guess per table, no-context default-deny, schema audit that every `tenant_id` table is protected; RBAC denial; expired/revoked/invalid tokens; credential non-leakage | runs as `buildseo_app` (NOBYPASSRLS) |
-| `tests/api` | auth flows, tenant switching, CRUD, validation errors, pagination/filtering/sorting, error envelope shape, OpenAPI completeness | `httpx.AsyncClient` + `ASGITransport` |
+| `tests/unit` | UUIDv7 monotonicity, Argon2id hashing and the password policy, JWT encode/decode/expiry/algorithm pinning, refresh-token hashing, envelope encryption including AAD tampering and rewrap, domain and URL normalisation, SSRF guarding, log redaction, scoring and hard rejections, both state machines, pagination, provider adapters, audit-metadata sanitisation, settings hardening | pure functions; no database and no web stack, so the suite is usable as a pre-commit check |
+| `tests/integration` | repository tenant scoping (including the refusal to query with no context), transaction and tenant-context lifecycle under pooling, unique and partial-unique constraints, check constraints, the FREE-only trigger, the approval gate, the idempotency ledger and its retention sweep, `FOR UPDATE SKIP LOCKED` claim semantics with backoff and stale-job requeue, seeded permission/role correctness and ladder nesting | real PostgreSQL; the schema is built by running Alembic from empty, so "migrations apply from scratch" is asserted on every run |
+| `tests/security` | **RLS**: cross-tenant read, read-by-id, `UPDATE`, `DELETE` and `INSERT` per table; unfiltered statements touching only the active tenant; no-context default deny; a schema audit that every table with a `tenant_id` is protected; RBAC denial per permission; expired, revoked, forged and wrong-`typ` tokens; refresh reuse detection; credential non-disclosure | runs as `buildseo_app`, which is `NOSUPERUSER` and `NOBYPASSRLS` — asserting isolation over a superuser connection would prove nothing |
+| `tests/api` | registration and login, tenant selection and switching, CRUD and validation errors, pagination/filtering/sorting, the error-envelope shape, the whole submission workflow through its approval gate, BYOK credentials and AI configuration, the audit trail, the job queue, and an OpenAPI contract check that every route is documented and no response schema has a field capable of carrying a secret | `httpx.AsyncClient` over `ASGITransport`, so the full middleware, dependency and exception-handler stack runs with no socket |
 
-Test database: created once, migrated with Alembic (proving migrations run from clean),
-then each test runs in a transaction that is rolled back. RLS tests use a second
-engine bound to the `NOBYPASSRLS` role. Fixtures build two full tenants (A and B) with
-distinct users, roles and domain rows, so cross-tenant assertions are always available.
+Two engines are provided to the database suites and the distinction is the
+point: an owner-role engine for seeding fixtures and for policy-independent
+assertions, and a runtime-role engine for every isolation test. Fixtures build
+two fully-populated workspaces (A and B) with their own users, roles, client
+sites, campaigns, publishers, opportunities and credentials, so a cross-tenant
+assertion always has a second tenant that demonstrably has data.
 
-Acceptance gate: `ruff`, `black --check`, `mypy` on `app/core`, `app/auth`, `app/rbac`,
-and the full `pytest` suite green against a database built purely from migrations.
+Acceptance gate: `ruff check`, `black --check`, `mypy app`, and the full
+`pytest` suite green against a database built purely from migrations.
