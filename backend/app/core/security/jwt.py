@@ -22,7 +22,7 @@ from jwt import InvalidTokenError as PyJwtInvalidTokenError
 from app.core.exceptions import InvalidTokenError, TokenExpiredError
 from app.core.ids import uuid7
 
-ACCESS_TOKEN_TYPE: Final = "access"  # noqa: S105 - a claim discriminator, not a secret
+ACCESS_TOKEN_TYPE: Final = "access"  # a claim discriminator, not a secret
 _REQUIRED_CLAIMS: Final = ["exp", "iat", "nbf", "sub", "jti", "typ", "iss", "aud"]
 
 
