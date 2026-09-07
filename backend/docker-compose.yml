@@ -1,0 +1,89 @@
+# Local development stack.
+#
+# Two services today (backend + postgres). The commented worker and redis
+# blocks are the intended growth path: the worker runs the same image with a
+# different command, and Redis would back the shared rate limiter and, later, a
+# distributed task queue. Nothing in the application needs to change for either.
+
+name: buildseo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # POSTGRES_USER is a superuser in this image and therefore BYPASSES RLS.
+      # It owns the schema and runs migrations only. The application connects
+      # as APP_DB_ROLE below, which is NOSUPERUSER/NOBYPASSRLS.
+      POSTGRES_USER: ${POSTGRES_USER:-buildseo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-buildseo}
+      POSTGRES_DB: ${POSTGRES_DB:-buildseo}
+      APP_DB_ROLE: ${DB_APP_ROLE:-buildseo_app}
+      APP_DB_PASSWORD: ${DB_APP_PASSWORD:-buildseo_app}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-buildseo} -d ${POSTGRES_DB:-buildseo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      # Runtime connection: the NOBYPASSRLS application role.
+      DATABASE_URL: postgresql+asyncpg://${DB_APP_ROLE:-buildseo_app}:${DB_APP_PASSWORD:-buildseo_app}@postgres:5432/${POSTGRES_DB:-buildseo}
+      # Migration connection: the schema owner.
+      DATABASE_MIGRATION_URL: postgresql+asyncpg://${POSTGRES_USER:-buildseo}:${POSTGRES_PASSWORD:-buildseo}@postgres:5432/${POSTGRES_DB:-buildseo}
+      DB_APP_ROLE: ${DB_APP_ROLE:-buildseo_app}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m scripts.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --no-access-log"
+
+  # Background worker: same image, same code, different entrypoint. Enable once
+  # discovery/qualification/verification jobs are being enqueued.
+  # worker:
+  #   build:
+  #     context: .
+  #     target: runtime
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://${DB_APP_ROLE:-buildseo_app}:${DB_APP_PASSWORD:-buildseo_app}@postgres:5432/${POSTGRES_DB:-buildseo}
+  #   command: ["python", "-m", "app.workers.runner"]
+
+  # Shared store for the rate limiter and, later, a distributed queue.
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   command: ["redis-server", "--save", "", "--appendonly", "no"]
+  #   ports:
+  #     - "${REDIS_PORT:-6379}:6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+
+volumes:
+  postgres-data:
