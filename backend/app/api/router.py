@@ -9,7 +9,47 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.v1 import (
+    ai,
+    audit,
+    auth,
+    campaigns,
+    client_websites,
+    credentials,
+    jobs,
+    me,
+    opportunities,
+    publishers,
+    rbac,
+    submissions,
+    tenants,
+    users,
+)
+
 api_router = APIRouter()
+
+# Registration order shapes the OpenAPI document. It also matters for routing:
+# a router with static paths that could shadow another's path parameters must
+# come first (see the note on publishers/opportunities/submissions below).
+api_router.include_router(auth.router)
+api_router.include_router(me.router)
+api_router.include_router(tenants.router)
+api_router.include_router(users.router)
+api_router.include_router(rbac.router)
+api_router.include_router(client_websites.router)
+api_router.include_router(campaigns.router)
+# These three declare static sub-paths (/publishers/discovery-runs,
+# /opportunities/state-machine, /submissions/review-queue) alongside
+# /{id} routes. FastAPI matches in declaration order and each router declares
+# its static paths before its parameterised ones, so "discovery-runs" is never
+# parsed as a UUID.
+api_router.include_router(publishers.router)
+api_router.include_router(opportunities.router)
+api_router.include_router(submissions.router)
+api_router.include_router(credentials.router)
+api_router.include_router(ai.router)
+api_router.include_router(audit.router)
+api_router.include_router(jobs.router)
 
 #: Drives section ordering and descriptions in the OpenAPI document.
 OPENAPI_TAGS: list[dict[str, str]] = [
