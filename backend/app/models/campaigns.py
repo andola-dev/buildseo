@@ -21,9 +21,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.enums import CampaignStatus
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import CampaignStatus
 
 
 class Campaign(Base, UUIDPrimaryKeyMixin, TenantOwnedMixin, TimestampMixin):

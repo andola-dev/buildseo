@@ -18,9 +18,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.enums import ContentStatus, SubmissionMethod, SubmissionStatus
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import ContentStatus, SubmissionMethod, SubmissionStatus
 
 
 class Submission(Base, UUIDPrimaryKeyMixin, TenantOwnedMixin, TimestampMixin):

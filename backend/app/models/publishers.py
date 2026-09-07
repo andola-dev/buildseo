@@ -23,9 +23,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
-from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import (
+from app.core.enums import (
     DiscoveryRunStatus,
     LinkType,
     PricingType,
@@ -33,6 +31,8 @@ from app.models.enums import (
     PublisherStatus,
     SubmissionMethod,
 )
+from app.db.base import Base
+from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Publisher(Base, UUIDPrimaryKeyMixin, TenantOwnedMixin, TimestampMixin):

@@ -6,9 +6,9 @@ from sqlalchemy import CheckConstraint, Index, String, Text, UniqueConstraint, t
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.enums import ClientWebsiteStatus
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import ClientWebsiteStatus
 
 
 class ClientWebsite(Base, UUIDPrimaryKeyMixin, TenantOwnedMixin, TimestampMixin):

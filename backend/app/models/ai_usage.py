@@ -5,9 +5,9 @@ from __future__ import annotations
 from sqlalchemy import CheckConstraint, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.enums import AiOperation, AiUsageStatus
 from app.db.base import Base
 from app.db.mixins import CreatedAtMixin, TenantOwnedMixin, UUIDPrimaryKeyMixin
-from app.models.enums import AiOperation, AiUsageStatus
 
 
 class AiUsageRecord(Base, UUIDPrimaryKeyMixin, TenantOwnedMixin, CreatedAtMixin):

@@ -19,9 +19,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.enums import MembershipStatus, TenantStatus
 from app.db.base import Base
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import MembershipStatus, TenantStatus
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.models.rbac import MembershipRole
