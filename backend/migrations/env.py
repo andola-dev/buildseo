@@ -14,8 +14,8 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
 from app.config.settings import get_settings
@@ -35,7 +35,7 @@ config.attributes.setdefault("db_app_role", settings.db_app_role)
 target_metadata = Base.metadata
 
 
-def _include_object(obj, name, type_, reflected, compare_to) -> bool:  # noqa: ANN001
+def _include_object(obj, name, type_, reflected, compare_to) -> bool:
     """Keep autogenerate focused on this application's own tables."""
     if type_ == "table" and name in {"alembic_version"}:
         return False
