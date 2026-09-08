@@ -22,6 +22,32 @@ export const loginSchema = z.object({
 
 export type LoginValues = z.infer<typeof loginSchema>;
 
+export const registerSchema = z
+  .object({
+    email: z
+      .string()
+      .min(1, "Enter your email address.")
+      .email("Enter a valid email address."),
+    first_name: z.string().max(120).optional().or(z.literal("")),
+    last_name: z.string().max(120).optional().or(z.literal("")),
+    password: z
+      .string()
+      .min(PASSWORD_MIN_LENGTH, `Use at least ${PASSWORD_MIN_LENGTH} characters.`)
+      .max(128, "That password is too long."),
+    confirm_password: z.string().min(1, "Confirm your password."),
+    workspace_name: z
+      .string()
+      .min(2, "Enter a workspace name of at least 2 characters.")
+      .max(200),
+    remember: z.boolean(),
+  })
+  .refine((values) => values.password === values.confirm_password, {
+    message: "The passwords don't match.",
+    path: ["confirm_password"],
+  });
+
+export type RegisterValues = z.infer<typeof registerSchema>;
+
 /**
  * A website URL.
  *

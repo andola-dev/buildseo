@@ -253,3 +253,7 @@ frontend/.env
 frontend/.env.local
 frontend/.env.*.local
 frontend/openapi.json
+
+# Playwright output when a run is launched from the repo root
+test-results/
+playwright-report/

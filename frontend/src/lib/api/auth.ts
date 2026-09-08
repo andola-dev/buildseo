@@ -12,14 +12,13 @@
  */
 
 import { SESSION_ROUTES } from "@/config/app";
-import { api, apiRequest } from "@/lib/api/http";
+import { api } from "@/lib/api/http";
 import { ApiError, apiErrorFromBody } from "@/lib/api/errors";
 import { unwrap, unwrapAck } from "@/lib/api/envelope";
 import { clearAccessToken, setAccessToken } from "@/lib/api/token-store";
 import type {
   AccessTokenResponse,
   ApiEnvelope,
-  RegisterRequest,
   SelectTenantRequest,
   UserSession,
   UUID,
@@ -179,13 +178,49 @@ export async function selectTenant(tenantId: UUID): Promise<AccessTokenResponse>
   return token;
 }
 
-/** Register a new account, optionally creating its first workspace. */
-export async function register(payload: RegisterRequest): Promise<void> {
-  await apiRequest<unknown>("/auth/register", {
-    method: "POST",
-    body: payload,
-    anonymous: true,
+export interface RegisterInput {
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+  /** Creating a workspace here is what makes the new account usable. */
+  workspaceName?: string;
+  remember: boolean;
+}
+
+/**
+ * Register a new account and sign in.
+ *
+ * Routed through the session proxy, not straight to FastAPI: `/auth/register`
+ * returns the same `TokenPair` as login, so the refresh token has to be
+ * captured into the HTTP-only cookie rather than handed to the browser.
+ */
+export async function register(input: RegisterInput): Promise<SessionTokenResponse> {
+  const tokens = await sessionRequest(SESSION_ROUTES.register, {
+    email: input.email,
+    password: input.password,
+    first_name: input.firstName ?? null,
+    last_name: input.lastName ?? null,
+    tenant_name: input.workspaceName ?? null,
+    remember: input.remember,
   });
+
+  if (!tokens?.access_token) {
+    throw new ApiError({
+      status: 0,
+      code: "MALFORMED_RESPONSE",
+      message: "We received an unexpected response from the server.",
+    });
+  }
+
+  setAccessToken({
+    accessToken: tokens.access_token,
+    ...(typeof tokens.expires_in === "number" ? { expiresIn: tokens.expires_in } : {}),
+    expiresAt: tokens.expires_at ?? null,
+    activeTenantId: tokens.active_tenant_id ?? null,
+  });
+
+  return tokens;
 }
 
 /** List the current user's active sessions (Settings → Security). */

@@ -19,6 +19,8 @@ export function useTenant() {
     tenantVersion,
     switchingTenant,
     switchTenant,
+    tenantStatus,
+    tenantError,
   } = useAuthContext();
 
   return {
@@ -28,6 +30,8 @@ export function useTenant() {
     tenantVersion,
     switchingTenant,
     switchTenant,
+    tenantStatus,
+    tenantError,
   };
 }
 

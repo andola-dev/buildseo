@@ -65,6 +65,18 @@ interface AuthContextValue {
 
   permissions: ReadonlySet<string>;
 
+  /**
+   * Where workspace resolution has got to.
+   *
+   * `resolving` matters: a user with two or more workspaces gets a token with
+   * no `tid` from login, so there is a window where the session has loaded but
+   * no workspace is active yet. Treating that as "no workspace" would flash an
+   * alarming empty state on every cold load.
+   */
+  tenantStatus: "resolving" | "ready" | "none";
+  /** Set when no workspace could be entered at all. */
+  tenantError: ApiError | null;
+
   login: (input: authApi.LoginInput) => Promise<void>;
   logout: (options?: { allSessions?: boolean }) => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
@@ -90,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [activeTenantId, setActiveTenantId] = useState<string | null>(null);
   const [tenantVersion, setTenantVersion] = useState(0);
   const [switchingTenant, setSwitchingTenant] = useState(false);
+  const [tenantError, setTenantError] = useState<ApiError | null>(null);
 
   /** Guards against restoring twice under React Strict Mode's double effect. */
   const bootstrapStarted = useRef(false);
@@ -198,15 +211,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await authApi.selectTenant(desired);
         setActiveTenantId(desired);
+        setTenantError(null);
         // The permission set belongs to the new token, so re-read the session.
         await queryClient.invalidateQueries({ queryKey: ["session"] });
-      } catch {
+      } catch (error) {
         // The workspace is no longer selectable (membership revoked, workspace
-        // suspended). Forget the stored preference and let the next render try
-        // the next candidate.
+        // suspended). Forget the stored preference so the next pass tries the
+        // next candidate, and record the failure so the UI can stop waiting
+        // rather than sitting on a spinner forever.
         if (stored === desired) {
           removeLocal(activeTenantStorageKey(session.user.id));
         }
+        setTenantError(isApiError(error) ? error : null);
       }
     })();
   }, [session, activeTenantId, queryClient]);
@@ -249,6 +265,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // been a different user in a different workspace.
       queryClient.clear();
       adoptionAttempt.current = null;
+      setTenantError(null);
       setActiveTenantId(tokens.active_tenant_id ?? null);
       setHasToken(true);
       setBootstrapped(true);
@@ -264,6 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setHasToken(false);
         setActiveTenantId(null);
         adoptionAttempt.current = null;
+        setTenantError(null);
         queryClient.clear();
         router.replace("/login");
       }
@@ -332,6 +350,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [tenants, activeTenantId],
   );
 
+  const tenantStatus: "resolving" | "ready" | "none" = useMemo(() => {
+    if (activeTenantId) return "ready";
+    if (session && tenants.length === 0) return "none";
+    // A failed adoption is terminal: stop waiting and let the UI say so.
+    if (tenantError) return "none";
+    return "resolving";
+  }, [activeTenantId, session, tenants.length, tenantError]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -346,6 +372,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       tenantVersion,
       switchingTenant,
       permissions,
+      tenantStatus,
+      tenantError,
       login,
       logout,
       switchTenant,
@@ -360,6 +388,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       tenantVersion,
       switchingTenant,
       permissions,
+      tenantStatus,
+      tenantError,
       login,
       logout,
       switchTenant,

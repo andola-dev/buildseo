@@ -12,9 +12,18 @@ test.describe("workspace isolation", () => {
     await page.goto("/campaigns");
     await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
 
-    await page.getByRole("button", { name: /change workspace/i }).click();
+    const switcher = page.getByRole("button", { name: /change workspace/i });
+    const active = (await switcher.innerText()).trim();
 
-    const options = page.getByRole("menuitem");
+    await switcher.click();
+
+    // Count workspaces only. The menu also carries a "Create workspace"
+    // action, so counting every menuitem would treat a single-workspace
+    // account as switchable and the spec would hang waiting for a switch that
+    // never happens.
+    const options = page
+      .getByRole("menuitem")
+      .filter({ hasNotText: /create workspace/i });
     const count = await options.count();
     test.skip(count < 2, "The account belongs to only one workspace.");
 
@@ -32,8 +41,8 @@ test.describe("workspace isolation", () => {
     // Pick a workspace other than the active one.
     for (let index = 0; index < count; index += 1) {
       const option = options.nth(index);
-      const text = await option.innerText();
-      if (text && !text.includes("Create workspace")) {
+      const text = (await option.innerText()).trim();
+      if (text && !active.includes(text)) {
         await option.click();
         break;
       }
