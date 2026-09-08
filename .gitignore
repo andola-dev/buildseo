@@ -217,6 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# BuildSEO local environment (never commit real secrets)
+backend/.env
+backend/.env.local
+backend/.venv*/
 # ---------------------------------------------------------------------------
 # Frontend (Next.js) workspace
 # ---------------------------------------------------------------------------

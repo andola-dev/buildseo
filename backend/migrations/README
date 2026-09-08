@@ -1,0 +1,19 @@
+Alembic migrations for the BuildSEO backend.
+
+Conventions
+-----------
+* One concern per revision, numbered 0001..NNNN in dependency order.
+* Every revision implements a working ``downgrade``.
+* Row-Level Security lives in a single revision (0017) so the whole policy set
+  is reviewable in one place.
+* Privilege grants (0018) target the role named by ``DB_APP_ROLE`` and are
+  skipped when that role does not exist, so the same revision runs in CI,
+  development and production.
+* Never apply DDL to a deployed database by hand.
+
+Usage
+-----
+    alembic upgrade head          # apply
+    alembic downgrade -1          # revert one revision
+    alembic history --verbose     # inspect
+    alembic upgrade head --sql    # render SQL without executing
