@@ -169,6 +169,14 @@ class AuthService:
     ) -> TokenPair:
         """Authenticate and issue a token pair."""
         user = await self.authenticate(email=email, password=password)
+        # No tenant is chosen yet, but membership lookup itself reads
+        # tenant_memberships — a tenant-owned, RLS-protected table. Without a
+        # user context, ``app_current_tenant_id()`` and ``app_current_user_id()``
+        # are both NULL, every predicate in the RLS policy evaluates to NULL,
+        # and the row is invisible even to its own owner. Establishing the
+        # user (with no tenant yet) engages the self-read policy so a member
+        # can see which tenants they belong to before one is selected.
+        await self._session.set_tenant_context(tenant_id=None, user_id=user.id)
         tenant = await self._resolve_login_tenant(user, requested_tenant_id)
         tenant_id = tenant.id if tenant else None
 
@@ -325,6 +333,10 @@ class AuthService:
                     "revoked_count": revoked,
                 },
             )
+            # The caller's session is unscoped and rolls back on any raised
+            # exception (see get_unscoped_session), which would otherwise
+            # silently undo the revocation this branch exists to perform.
+            await self._session.commit()
             raise TokenRevokedError("This refresh token has already been used")
 
         if session_row.expires_at <= datetime.now(UTC):
@@ -333,6 +345,7 @@ class AuthService:
         user = await self._users.get_by_id(session_row.user_id)
         if user is None or not user.is_active:
             await self._sessions.revoke_family(session_row.family_id, reason=REASON_LOGOUT)
+            await self._session.commit()
             raise InactiveUserError()
 
         # Re-validate the remembered workspace: membership may have been

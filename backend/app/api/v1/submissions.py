@@ -154,6 +154,7 @@ async def review_queue(
 @router.get(
     "/{submission_id}",
     summary="Get a submission",
+    description="Fetches one submission by id.",
     response_model=ApiResponse[SubmissionRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.SUBMISSION_READ))],
@@ -189,6 +190,7 @@ async def update_submission(
     "/{submission_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a submission",
+    description="Deletes a submission.",
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.SUBMISSION_DELETE))],
 )

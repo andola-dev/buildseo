@@ -82,6 +82,7 @@ async def create_campaign(
 @router.get(
     "/{campaign_id}",
     summary="Get a campaign",
+    description="Fetches one campaign by id.",
     response_model=ApiResponse[CampaignRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.CAMPAIGN_READ))],
@@ -96,6 +97,7 @@ async def get_campaign(
 @router.patch(
     "/{campaign_id}",
     summary="Update a campaign",
+    description="Updates a campaign's editable fields.",
     response_model=ApiResponse[CampaignRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.CAMPAIGN_UPDATE))],

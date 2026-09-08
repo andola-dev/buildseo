@@ -180,14 +180,22 @@ pytest                      # everything
 
 The database suites build the schema by running **Alembic from empty**, so
 "migrations apply cleanly from scratch" is asserted on every run rather than
-being a separate thing to remember. Point them at a scratch database:
+being a separate thing to remember. They connect using `TEST_DATABASE_URL`
+and `TEST_APP_DATABASE_URL`, which `tests/conftest.py` loads from
+`.env.test` — committed, since it holds no secrets, just the address of a
+scratch database that must never be the development one. Create that
+database once:
 
 ```bash
 createdb buildseo_test
-export TEST_DATABASE_URL=postgresql+asyncpg://buildseo:buildseo@localhost:5432/buildseo_test
-export TEST_APP_DATABASE_URL=postgresql+asyncpg://buildseo_app:buildseo_app@localhost:5432/buildseo_test
+psql -d buildseo -c "GRANT CONNECT ON DATABASE buildseo_test TO buildseo_app;"
+psql -d buildseo_test -c "GRANT USAGE ON SCHEMA public TO buildseo_app; REVOKE CREATE ON SCHEMA public FROM PUBLIC;"
 pytest
 ```
+
+If your Postgres uses different roles or a different host, override
+`TEST_DATABASE_URL`/`TEST_APP_DATABASE_URL` in your shell — an exported
+value always wins over `.env.test`.
 
 Isolation is asserted through the `NOBYPASSRLS` runtime role. Asserting it over
 a superuser connection would prove nothing.

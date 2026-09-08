@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from ipaddress import IPv4Address, IPv6Address
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+
+
+def _stringify_ip(value: object) -> object:
+    """asyncpg maps a Postgres INET column to ``IPv4Address``/``IPv6Address``."""
+    if isinstance(value, (IPv4Address, IPv6Address)):
+        return str(value)
+    return value
 
 #: ISO 3166-1 alpha-2, upper-cased.
 CountryCode = Annotated[
@@ -32,6 +40,8 @@ RoleSlug = Annotated[
 NonEmptyStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 #: 0-100 normalised score.
 Score = Annotated[float, Field(ge=0, le=100)]
+#: Accepts the ``IPv4Address``/``IPv6Address`` a Postgres INET column round-trips as.
+IPAddressStr = Annotated[str, BeforeValidator(_stringify_ip)]
 
 
 class SchemaBase(BaseModel):

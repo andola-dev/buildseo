@@ -18,7 +18,7 @@ import pytest
 from app.core.enums import AiProvider, AiPurpose, CredentialStatus
 from app.schemas.ai import AiUsageRead
 
-pytestmark = [pytest.mark.api, pytest.mark.asyncio]
+pytestmark = pytest.mark.api
 
 # Obviously fake, and never sent anywhere: FormSubmissionProvider and the AI
 # clients are not invoked because `verify` is left off in these tests.

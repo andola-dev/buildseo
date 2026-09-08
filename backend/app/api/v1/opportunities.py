@@ -138,6 +138,7 @@ async def opportunity_state_machine() -> ApiResponse[dict]:
 @router.get(
     "/{opportunity_id}",
     summary="Get an opportunity",
+    description="Fetches one link opportunity by id.",
     response_model=ApiResponse[OpportunityRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.OPPORTUNITY_READ))],
@@ -172,6 +173,7 @@ async def update_opportunity(
     "/{opportunity_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an opportunity",
+    description="Deletes a link opportunity.",
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.OPPORTUNITY_DELETE))],
 )

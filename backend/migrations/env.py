@@ -28,7 +28,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.alembic_url)
+# A caller (the test suite's migrated_database fixture) may have already
+# pointed this Config at a different database, e.g. to keep migrations run
+# by tests off the development database. Only fall back to the process's
+# own settings when nothing more specific was configured.
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", settings.alembic_url)
 #: Consumed by the grants revision so it can target the runtime role.
 config.attributes.setdefault("db_app_role", settings.db_app_role)
 

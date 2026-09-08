@@ -212,6 +212,7 @@ async def discover_publishers(
 @router.get(
     "/{publisher_id}",
     summary="Get a publisher",
+    description="Fetches one publisher by id.",
     response_model=ApiResponse[PublisherRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.PUBLISHER_READ))],
@@ -245,6 +246,7 @@ async def update_publisher(
     "/{publisher_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a publisher",
+    description="Deletes a publisher.",
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.PUBLISHER_DELETE))],
 )

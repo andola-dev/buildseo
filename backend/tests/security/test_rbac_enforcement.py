@@ -51,7 +51,7 @@ class TestViewerIsReadOnly:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="viewer@fixture.test",
+            email="viewer@fixture.example.com",
             role_slug="viewer",
         )
         response = await client.get("/api/v1/publishers", headers=headers)
@@ -64,7 +64,7 @@ class TestViewerIsReadOnly:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="viewer2@fixture.test",
+            email="viewer2@fixture.example.com",
             role_slug="viewer",
         )
         response = await client.post(
@@ -85,7 +85,7 @@ class TestViewerIsReadOnly:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="viewer3@fixture.test",
+            email="viewer3@fixture.example.com",
             role_slug="viewer",
         )
         assert (await client.get("/api/v1/credentials", headers=headers)).status_code == 403
@@ -101,7 +101,7 @@ class TestSeparationOfDuties:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="specialist@fixture.test",
+            email="specialist@fixture.example.com",
             role_slug="seo_specialist",
         )
 
@@ -138,7 +138,7 @@ class TestSeparationOfDuties:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="manager@fixture.test",
+            email="manager@fixture.example.com",
             role_slug="seo_manager",
         )
         created = await client.post(
@@ -165,7 +165,7 @@ class TestSeparationOfDuties:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="specialist2@fixture.test",
+            email="specialist2@fixture.example.com",
             role_slug="seo_specialist",
         )
         create_role = await client.post(
@@ -186,7 +186,7 @@ class TestSuspendedMembership:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="suspended@fixture.test",
+            email="suspended@fixture.example.com",
             role_slug="seo_manager",
         )
         assert (await client.get("/api/v1/publishers", headers=headers)).status_code == 200
@@ -197,7 +197,7 @@ class TestSuspendedMembership:
         membership_id = next(
             row["id"]
             for row in members.json()["data"]
-            if row["user"] and row["user"]["email"] == "suspended@fixture.test"
+            if row["user"] and row["user"]["email"] == "suspended@fixture.example.com"
         )
         suspended = await client.patch(
             f"/api/v1/tenants/{tenant_a.tenant_id}/members/{membership_id}",
@@ -260,7 +260,7 @@ class TestCustomRoles:
             client,
             owner_headers=tenant_a_headers,
             tenant=tenant_a,
-            email="researcher@fixture.test",
+            email="researcher@fixture.example.com",
             role_slug="publisher_researcher",
         )
         assert (await client.get("/api/v1/publishers", headers=headers)).status_code == 200

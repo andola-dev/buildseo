@@ -99,6 +99,7 @@ async def create_role(payload: RoleCreate, services: ServicesDep) -> ApiResponse
 @router.get(
     "/roles/{role_id}",
     summary="Get a role",
+    description="Fetches one role by id, including its permission codes.",
     response_model=ApiResponse[RoleRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.ROLE_READ))],

@@ -18,7 +18,7 @@ class TestRegistration:
         response = await client.post(
             "/api/v1/auth/register",
             json={
-                "email": "founder@newco.test",
+                "email": "founder@newco.example.com",
                 "password": "F0under!Password",
                 "first_name": "Sam",
                 "tenant_name": "NewCo",
@@ -37,7 +37,7 @@ class TestRegistration:
         registered = await client.post(
             "/api/v1/auth/register",
             json={
-                "email": "founder2@newco.test",
+                "email": "founder2@newco.example.com",
                 "password": "F0under!Password",
                 "tenant_name": "NewCo Two",
             },
@@ -54,7 +54,7 @@ class TestRegistration:
     ) -> None:
         response = await client.post(
             "/api/v1/auth/register",
-            json={"email": "solo@newco.test", "password": "S0lo!Password123"},
+            json={"email": "solo@newco.example.com", "password": "S0lo!Password123"},
         )
         assert response.status_code == 201
         assert response.json()["data"]["active_tenant_id"] is None
@@ -86,7 +86,7 @@ class TestRegistration:
     ) -> None:
         response = await client.post(
             "/api/v1/auth/register",
-            json={"email": f"weak-{len(password)}@newco.test", "password": password},
+            json={"email": f"weak-{len(password)}@newco.example.com", "password": password},
         )
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "VALIDATION_ERROR"

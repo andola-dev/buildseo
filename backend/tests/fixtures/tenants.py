@@ -202,7 +202,7 @@ async def tenants(
             session=session,
             resources=resources,
             slug="tenant-a",
-            email="owner-a@fixture.test",
+            email="owner-a@fixture.example.com",
             hasher=hasher,
         )
         await session.commit()
@@ -212,7 +212,7 @@ async def tenants(
             session=session,
             resources=resources,
             slug="tenant-b",
-            email="owner-b@fixture.test",
+            email="owner-b@fixture.example.com",
             hasher=hasher,
         )
         await session.commit()

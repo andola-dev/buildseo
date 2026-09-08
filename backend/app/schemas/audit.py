@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from app.schemas.common import ReadSchemaBase
+from app.schemas.common import IPAddressStr, ReadSchemaBase
 
 
 class AuditLogRead(ReadSchemaBase):
@@ -30,7 +30,7 @@ class AuditLogRead(ReadSchemaBase):
         serialization_alias="metadata",
         description="Allow-listed, non-sensitive context",
     )
-    ip_address: str | None = None
+    ip_address: IPAddressStr | None = None
     user_agent: str | None = None
     request_id: str | None = None
     created_at: datetime

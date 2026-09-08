@@ -86,6 +86,7 @@ async def create_client_website(
 @router.get(
     "/{website_id}",
     summary="Get a client website",
+    description="Fetches one client website by id.",
     response_model=ApiResponse[ClientWebsiteRead],
     responses=CRUD_ERROR_RESPONSES,
     dependencies=[Depends(require_permission(Perm.CLIENT_WEBSITE_READ))],

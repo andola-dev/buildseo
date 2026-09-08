@@ -41,7 +41,9 @@ async def read_me(
     roles_by_membership = {
         membership.id: [
             role.slug
-            for role in await services.membership_roles.list_roles_for_membership(membership.id)
+            for role in await services.membership_roles.list_roles_for_membership(
+                membership.id, tenant_id=membership.tenant_id
+            )
         ]
         # Role names are tenant-owned, so they can only be read for the
         # workspace this request is scoped to; other workspaces list as empty.

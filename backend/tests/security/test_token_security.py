@@ -24,7 +24,7 @@ class TestNoUserEnumeration:
     ) -> None:
         unknown = await client.post(
             "/api/v1/auth/login",
-            json={"email": "nobody@fixture.test", "password": PASSWORD},
+            json={"email": "nobody@fixture.example.com", "password": PASSWORD},
         )
         wrong = await client.post(
             "/api/v1/auth/login",

@@ -23,9 +23,19 @@ NAMING_CONVENTION = {
 
 
 class Base(DeclarativeBase):
-    """Base class for every ORM model."""
+    """Base class for every ORM model.
+
+    ``eager_defaults=True`` makes every UPDATE use ``RETURNING`` to refresh
+    server-computed columns (``updated_at``'s ``onupdate=func.now()``) in the
+    same round trip. Without it, SQLAlchemy's "auto" default only applies
+    eager RETURNING to INSERT, never UPDATE — so ``updated_at`` stays
+    unloaded after a PATCH and the next synchronous attribute read (e.g. a
+    Pydantic response schema) crashes with ``MissingGreenlet`` trying to lazy
+    -load it outside an async context.
+    """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+    __mapper_args__ = {"eager_defaults": True}
 
     def __repr__(self) -> str:
         """Identity-only repr. Never dumps column values, which could include

@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import EmailStr, Field, SecretStr, StringConstraints, field_validator
 
 from app.core.security.password_policy import DEFAULT_POLICY
-from app.schemas.common import ReadSchemaBase, SchemaBase, Slug
+from app.schemas.common import IPAddressStr, ReadSchemaBase, SchemaBase, Slug
 
 #: Passwords travel as ``SecretStr`` so an accidental ``repr`` of a request
 #: model prints ``**********`` rather than the credential.
@@ -111,7 +111,7 @@ class SessionRead(ReadSchemaBase):
 
     id: UUID = Field(description="Session identifier")
     user_agent: str | None = Field(default=None, description="Client user agent at creation")
-    ip_address: str | None = Field(default=None, description="Client address at creation")
+    ip_address: IPAddressStr | None = Field(default=None, description="Client address at creation")
     active_tenant_id: UUID | None = None
     created_at: datetime
     last_used_at: datetime | None = None

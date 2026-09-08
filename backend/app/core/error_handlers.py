@@ -93,10 +93,31 @@ async def validation_error_handler(request: Request, exc: Exception) -> JSONResp
         extra={"path": request.url.path, "method": request.method, "fields": list(fields)},
     )
     return error_response(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="VALIDATION_ERROR",
         message="Request validation failed",
         details={"fields": fields},
+    )
+
+
+async def value_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """A rejected value from logic outside the request schema (e.g. a sort field).
+
+    Pydantic already turns a ``ValueError`` raised inside a field validator
+    into ``RequestValidationError`` before it gets here, so this only ever
+    catches a bare ``ValueError`` an endpoint or repository raises directly —
+    the same 422 shape a schema rejection would produce, rather than an
+    opaque 500.
+    """
+    assert isinstance(exc, ValueError)
+    logger.info(
+        "request rejected: invalid value",
+        extra={"path": request.url.path, "method": request.method},
+    )
+    return error_response(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        message=str(exc),
     )
 
 
@@ -192,6 +213,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     """Install every handler. Order is by specificity, not registration."""
     app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
+    app.add_exception_handler(ValueError, value_error_handler)
     app.add_exception_handler(IntegrityError, integrity_error_handler)
     app.add_exception_handler(DBAPIError, database_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)

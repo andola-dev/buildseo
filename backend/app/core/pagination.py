@@ -78,7 +78,7 @@ def resolve_sort(
 
     Raises:
         ValueError: the requested field is not in the resource's allow-list.
-            Callers translate this into a 422 rather than silently ignoring it,
+            The API layer turns this into a 422 (see ``value_error_handler``),
             so a client never believes it sorted when it did not.
     """
     if requested is None:

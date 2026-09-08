@@ -26,7 +26,7 @@ from app.models.idempotency import IdempotencyKey
 from app.repositories.idempotency import IdempotencyKeyRepository
 from tests.fixtures.tenants import TenantFixture
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = pytest.mark.integration
 
 ENDPOINT = "POST /api/v1/opportunities"
 

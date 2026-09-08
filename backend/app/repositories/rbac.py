@@ -134,12 +134,22 @@ class MembershipRoleRepository(TenantRepository[MembershipRole]):
             self.new(membership_id=membership_id, role_id=role_id)
         await self.session.flush()
 
-    async def list_roles_for_membership(self, membership_id: UUID) -> list[Role]:
+    async def list_roles_for_membership(
+        self, membership_id: UUID, *, tenant_id: UUID | None = None
+    ) -> list[Role]:
+        """List roles for a membership.
+
+        Callers already scoped to a tenant session can omit ``tenant_id`` and
+        rely on ``self.tenant_id``. ``GET /me`` is not tenant-scoped (a caller
+        may list roles across several of their memberships in one request), so
+        it passes the target membership's tenant explicitly instead.
+        """
+        scope = tenant_id if tenant_id is not None else self.tenant_id
         result = await self.session.execute(
             select(Role)
             .join(MembershipRole, MembershipRole.role_id == Role.id)
             .where(
-                MembershipRole.tenant_id == self.tenant_id,
+                MembershipRole.tenant_id == scope,
                 MembershipRole.membership_id == membership_id,
             )
             .order_by(Role.name)
