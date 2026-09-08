@@ -185,8 +185,8 @@ async def _amain(argv: list[str] | None = None) -> int:
     logger.info(
         "permission catalog seeded",
         extra={
-            "created": created,
-            "updated": updated,
+            "permissions_created": created,
+            "permissions_updated": updated,
             "total": len(PERMISSION_CATALOG),
         },
     )

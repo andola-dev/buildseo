@@ -18,6 +18,7 @@ Revises: 0017
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -28,11 +29,21 @@ down_revision: str | None = "0017"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+_VALID_ROLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _app_role() -> str:
-    """Resolve the runtime role from Alembic attributes, then the environment."""
+    """Resolve the runtime role from Alembic attributes, then the environment.
+
+    ``DO`` blocks cannot take bound query parameters, so the role name is
+    interpolated directly into the block below. It is validated as a plain
+    SQL identifier here to keep that interpolation safe.
+    """
     configured = context.config.attributes.get("db_app_role")
-    return str(configured or os.environ.get("DB_APP_ROLE") or "buildseo_app")
+    role = str(configured or os.environ.get("DB_APP_ROLE") or "buildseo_app")
+    if not _VALID_ROLE_NAME.fullmatch(role):
+        raise ValueError(f"invalid DB_APP_ROLE {role!r}: must be a plain SQL identifier")
+    return role
 
 
 def upgrade() -> None:
@@ -67,10 +78,10 @@ def upgrade() -> None:
 
     # ---------------------------------------------------------------- grants --
     role = _app_role()
-    op.execute(sa.text("""
+    op.execute(f"""
             DO $do$
             DECLARE
-                app_role text := :role;
+                app_role text := '{role}';
             BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
                     RAISE NOTICE
@@ -111,15 +122,15 @@ def upgrade() -> None:
                 RAISE NOTICE 'granted runtime DML privileges to %', app_role;
             END
             $do$
-            """).bindparams(role=role))
+            """)
 
 
 def downgrade() -> None:
     role = _app_role()
-    op.execute(sa.text("""
+    op.execute(f"""
             DO $do$
             DECLARE
-                app_role text := :role;
+                app_role text := '{role}';
             BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
                     RETURN;
@@ -143,7 +154,7 @@ def downgrade() -> None:
                 EXECUTE format('REVOKE USAGE ON SCHEMA public FROM %I', app_role);
             END
             $do$
-            """).bindparams(role=role))
+            """)
 
     op.drop_index("ix_opportunities_status_updated_at", table_name="opportunities")
     op.execute("DROP INDEX IF EXISTS ix_campaigns_name_trgm")

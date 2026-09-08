@@ -14,7 +14,7 @@ from functools import lru_cache
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.crypto.keys import MASTER_KEY_BYTES
 
@@ -92,9 +92,9 @@ class Settings(BaseSettings):
     encryption_key_version: Annotated[int, Field(ge=1)] = 1
 
     # --------------------------------------------------------------- http ---
-    cors_origins: list[str] = Field(default_factory=list)
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     cors_allow_credentials: bool = True
-    trusted_hosts: list[str] = Field(default_factory=list)
+    trusted_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     secure_headers_enabled: bool = True
 
     # ------------------------------------------------------------ logging ---

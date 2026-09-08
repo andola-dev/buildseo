@@ -174,13 +174,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
 
+#: FastAPI's built-in Swagger UI / ReDoc pages, which pull their JS and CSS
+#: from a CDN and run inline bootstrap scripts. The blanket API CSP below
+#: would silently block all of that, leaving a docs page with no endpoints.
+_DOCS_PATHS = frozenset({"/docs", "/redoc"})
+
+_API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+_DOCS_CSP = (
+    "default-src 'none'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https://cdn.jsdelivr.net https://fastapi.tiangolo.com; "
+    "font-src 'self' data: https://cdn.jsdelivr.net; "
+    "connect-src 'self'; "
+    "worker-src 'self' blob:; "
+    "frame-ancestors 'none'; base-uri 'none'"
+)
+
+
 class SecureHeadersMiddleware(BaseHTTPMiddleware):
     """Adds defensive response headers.
 
     This is a JSON API, so the CSP is maximally restrictive — it serves no
     scripts, styles or frames of its own. ``X-Frame-Options: DENY`` and
     ``nosniff`` protect the docs pages and any error body a browser might
-    render directly.
+    render directly. The docs pages themselves (``/docs``, ``/redoc``) get a
+    relaxed CSP scoped to exactly what Swagger UI / ReDoc need to load.
     """
 
     def __init__(self, app: ASGIApp, *, hsts: bool = True) -> None:
@@ -192,10 +211,8 @@ class SecureHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        response.headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-        )
+        csp = _DOCS_CSP if request.url.path in _DOCS_PATHS else _API_CSP
+        response.headers.setdefault("Content-Security-Policy", csp)
         response.headers.setdefault(
             "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
         )
