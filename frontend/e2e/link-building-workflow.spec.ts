@@ -40,7 +40,21 @@ test.describe("free listing link-building workflow", () => {
     await page.goto("/campaigns");
 
     await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
-    await page.getByRole("link", { name: /new campaign/i }).click();
+
+    // The page rendering but its primary action missing means the backend
+    // returned no permissions, not that the UI is broken — say so, rather than
+    // spending the full test timeout on a bare "waiting for locator".
+    const newCampaign = page.getByRole("link", { name: /new campaign/i });
+    await expect(
+      newCampaign,
+      "The Campaigns page rendered but its 'New campaign' action is gated off, " +
+        "which means GET /me returned no campaign.create permission. See " +
+        "docs/BACKEND_DEFECTS.md, BE-8: /me reports permissions: [] even for " +
+        "an owner, because it reads membership_roles and role_permissions on a " +
+        "session with no tenant bound. The frontend is correctly withholding " +
+        "an action the backend says the user does not have.",
+    ).toBeVisible({ timeout: 15_000 });
+    await newCampaign.click();
     await expect(page).toHaveURL(/\/campaigns\/new/);
 
     // A campaign needs a client website; create one first if there are none.

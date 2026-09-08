@@ -40,6 +40,7 @@ export const API_TIMEOUT_MS = Number.parseInt(
  */
 export const SESSION_ROUTES = {
   login: "/api/session/login",
+  register: "/api/session/register",
   refresh: "/api/session/refresh",
   logout: "/api/session/logout",
 } as const;

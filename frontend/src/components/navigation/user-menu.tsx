@@ -32,7 +32,12 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
     try {
       await logout();
     } catch (error) {
-      toast.error("Couldn't sign out", { description: errorMessage(error) });
+      // `logout` clears the token and redirects in a `finally`, so this device
+      // *is* signed out — only the server-side revocation failed. Saying
+      // "couldn't sign out" over an already-empty session would be wrong.
+      toast.warning("Signed out on this device only", {
+        description: `${errorMessage(error)} Other sessions may still be active.`,
+      });
     } finally {
       setSigningOut(false);
     }

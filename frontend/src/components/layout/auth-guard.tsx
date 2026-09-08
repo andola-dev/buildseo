@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { Link2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ function BootSplash() {
  */
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { status, sessionError, refetchSession } = useAuth();
-  const { activeTenantId, tenants } = useTenant();
+  const { tenants, tenantStatus, tenantError } = useTenant();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -67,23 +68,35 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   /**
-   * Signed in but with no workspace.
+   * Signed in, but no workspace is active yet.
    *
-   * Every tenant-scoped endpoint requires a workspace, so rendering the
-   * dashboard here would produce a screen of `TENANT_CONTEXT_REQUIRED` errors.
+   * Three distinct situations, which must not be conflated:
+   *
+   * - `resolving` — the session has loaded but the workspace-scoped token is
+   *   still being minted. Every account with two or more workspaces passes
+   *   through this on each cold load, so showing an empty state here would
+   *   flash "No workspace yet" at users who plainly have one.
+   * - `none` — the account genuinely belongs to no workspace, or none could be
+   *   entered. This is the one case worth an explanation.
+   * - `ready` — fall through and render the application.
    */
-  if (!activeTenantId) {
+  if (tenantStatus === "resolving") return <BootSplash />;
+
+  if (tenantStatus === "none") {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6">
         <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-          <h1 className="text-lg font-semibold">No workspace yet</h1>
+          <h1 className="text-lg font-semibold">
+            {tenants.length === 0 ? "No workspace yet" : "Can't open a workspace"}
+          </h1>
           <p className="text-muted-foreground text-sm">
             {tenants.length === 0
               ? "Your account isn't a member of any workspace. Ask an owner to invite you, or create one to get started."
-              : "Select a workspace to continue."}
+              : (tenantError?.message ??
+                "None of your workspaces could be opened. They may have been suspended, or your membership removed.")}
           </p>
           <Button asChild size="sm">
-            <a href="/settings/workspace">Manage workspaces</a>
+            <Link href="/settings/workspace">Manage workspaces</Link>
           </Button>
         </div>
       </div>

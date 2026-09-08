@@ -42,21 +42,37 @@ export async function signIn(
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
   /**
-   * Fail with a diagnosis rather than a bare timeout.
+   * Wait for the workspace to actually resolve, then fail with a diagnosis
+   * rather than a bare timeout.
    *
-   * A backend whose tenant resolution is blocked by RLS reports no workspaces,
-   * so the app correctly shows "No workspace yet" — which would otherwise look
-   * like a frontend regression. See docs/API_CONTRACT.md, "Blocking backend
-   * defect".
+   * Landing on `/dashboard` is not the same as being *in* a workspace. An
+   * account belonging to more than one workspace arrives with an unscoped
+   * token, and `AuthProvider` then adopts one — during which `AuthGuard`
+   * deliberately renders the boot splash rather than flashing "No workspace
+   * yet" at someone who plainly has one. So the settled state is whichever of
+   * these appears once the splash is gone; reading it any earlier just races
+   * the adoption.
    */
-  const noWorkspace = page.getByRole("heading", { name: "No workspace yet" });
-  if (await noWorkspace.isVisible({ timeout: 5000 }).catch(() => false)) {
+  const splash = page.getByText("Loading your workspace…");
+  await splash.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => {
+    /* Never shown at all — a single-workspace account is scoped from login. */
+  });
+
+  const blocked = page.getByRole("heading", { name: /No workspace yet|Can't open a workspace/ });
+  if (await blocked.isVisible().catch(() => false)) {
+    const heading = (await blocked.textContent())?.trim() ?? "";
+    const detail = await page
+      .getByRole("alert")
+      .first()
+      .textContent()
+      .catch(() => null);
     throw new Error(
-      "Signed in, but the backend reported no workspaces for this account. " +
-        "This is the tenant-resolution defect documented in " +
-        "docs/API_CONTRACT.md (\"Blocking backend defect\") — GET /me returns " +
-        "tenants: [] because the membership lookup runs before any RLS " +
-        "context is set. Not a frontend failure.",
+      `Signed in, but the app could not enter a workspace: "${heading}". ` +
+        (detail ? `The page reports: "${detail.trim()}". ` : "") +
+        "This is a backend tenant-resolution failure, not a frontend one — the " +
+        "app is correctly reporting what GET /me returned. Check " +
+        "docs/BACKEND_DEFECTS.md, and confirm the E2E account has an ACTIVE " +
+        "membership in an ACTIVE workspace.",
     );
   }
 }

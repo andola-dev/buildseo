@@ -29,7 +29,7 @@ vi.mock("next/navigation", () => ({
 /** A probe that surfaces the provider's state as text for assertions. */
 function Probe() {
   const { status, user, login, logout } = useAuth();
-  const { activeTenantId, tenants, switchTenant, tenantVersion } = useTenant();
+  const { activeTenantId, tenants, switchTenant, tenantVersion, tenantStatus } = useTenant();
   const { can } = usePermissions();
 
   return (
@@ -39,6 +39,7 @@ function Probe() {
       <span data-testid="tenant">{activeTenantId ?? "none"}</span>
       <span data-testid="tenant-count">{tenants.length}</span>
       <span data-testid="tenant-version">{tenantVersion}</span>
+      <span data-testid="tenant-status">{tenantStatus}</span>
       <span data-testid="can-create">{String(can("campaign.create"))}</span>
       <span data-testid="can-approve">{String(can("submission.approve"))}</span>
 
@@ -60,7 +61,13 @@ function Probe() {
       >
         Sign in
       </button>
-      <button type="button" onClick={() => void logout()}>
+      {/*
+        `logout` rethrows a failed request after clearing local state, and the
+        real caller (`UserMenu`) catches it to show a toast. Catching here too
+        keeps a deliberately-offline test from leaking an unhandled rejection
+        into the run.
+      */}
+      <button type="button" onClick={() => void logout().catch(() => {})}>
         Sign out
       </button>
     </div>
@@ -198,6 +205,103 @@ describe("session bootstrap", () => {
     );
     expect(selected).toBe(TENANT_A);
     expect(screen.getByTestId("tenant")).toHaveTextContent(TENANT_A);
+  });
+
+  it("reports the workspace as resolving, not absent, while adoption is in flight", async () => {
+    let releaseSelect: (() => void) | null = null;
+    const selectBlocked = new Promise<void>((resolve) => {
+      releaseSelect = resolve;
+    });
+
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+
+      if (url === "/api/session/refresh") {
+        return jsonResponse({ access_token: "unscoped", expires_in: 900 });
+      }
+      if (url.endsWith("/auth/select-tenant")) {
+        // Hold the switch open to inspect the intermediate state.
+        await selectBlocked;
+        return jsonResponse({
+          data: {
+            access_token: "scoped",
+            expires_in: 900,
+            expires_at: new Date(Date.now() + 900_000).toISOString(),
+            active_tenant_id: TENANT_A,
+          },
+        });
+      }
+      if (url.endsWith("/me")) {
+        return jsonResponse({
+          data: makeSession({ active_tenant_id: null, permissions: [] }),
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }) as unknown as typeof fetch;
+
+    renderProvider();
+
+    // Wait until the session has actually loaded its memberships, so the
+    // assertion below is about the adoption window rather than the earlier
+    // pre-session one.
+    await waitFor(() =>
+      expect(screen.getByTestId("tenant-count")).toHaveTextContent("2"),
+    );
+
+    // The account plainly has workspaces, so this window must not be reported
+    // as "none" — that is what made the guard flash "No workspace yet".
+    expect(screen.getByTestId("tenant-status")).toHaveTextContent("resolving");
+
+    await act(async () => {
+      releaseSelect?.();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tenant-status")).toHaveTextContent("ready"),
+    );
+  });
+
+  it("reports 'none' when the account belongs to no workspace at all", async () => {
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === "/api/session/refresh") {
+        return jsonResponse({ access_token: "t", expires_in: 900 });
+      }
+      return jsonResponse({
+        data: makeSession({ tenants: [], active_tenant_id: null, permissions: [] }),
+      });
+    }) as unknown as typeof fetch;
+
+    renderProvider();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tenant-status")).toHaveTextContent("none"),
+    );
+  });
+
+  it("stops waiting and reports 'none' when every workspace is refused", async () => {
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === "/api/session/refresh") {
+        return jsonResponse({ access_token: "unscoped", expires_in: 900 });
+      }
+      if (url.endsWith("/auth/select-tenant")) {
+        return jsonResponse(
+          { error: { code: "TENANT_ACCESS_DENIED", message: "denied" } },
+          403,
+        );
+      }
+      return jsonResponse({
+        data: makeSession({ active_tenant_id: null, permissions: [] }),
+      });
+    }) as unknown as typeof fetch;
+
+    renderProvider();
+
+    // A permanently failing adoption must be terminal, not an endless spinner.
+    await waitFor(() =>
+      expect(screen.getByTestId("tenant-status")).toHaveTextContent("none"),
+    );
   });
 
   it("does not retry workspace selection in a loop when it is refused", async () => {

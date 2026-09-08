@@ -72,6 +72,62 @@ test.describe("authentication", () => {
     expect(requested).toBe(false);
   });
 
+  test("every link on the login page resolves", async ({ page }) => {
+    await page.goto("/login");
+
+    const hrefs = await page.getByRole("link").evaluateAll((links) =>
+      links
+        .map((link) => (link as HTMLAnchorElement).getAttribute("href"))
+        .filter((href): href is string => href !== null && href.startsWith("/")),
+    );
+
+    expect(hrefs.length).toBeGreaterThan(0);
+
+    // A dangling link is exactly how /register shipped broken: the copy
+    // offered "create a workspace" and the route did not exist.
+    for (const href of hrefs) {
+      const response = await page.request.get(href);
+      expect(response.status(), `${href} is a dead link`).toBeLessThan(400);
+    }
+  });
+
+  test("the registration page is reachable and describes itself", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByRole("link", { name: /create a workspace/i }).click();
+
+    await expect(page).toHaveURL(/\/register/);
+    await expect(
+      page.getByRole("heading", { name: /create your .* workspace/i }),
+    ).toBeVisible();
+
+    // A workspace name is required: an account without one cannot use any
+    // tenant-scoped endpoint.
+    await expect(page.getByLabel(/workspace name/i)).toBeVisible();
+    await expect(page.getByLabel(/confirm password/i)).toBeVisible();
+
+    // And back again, so neither page is a dead end.
+    await page.getByRole("link", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("registration validates locally before making a request", async ({ page }) => {
+    await page.goto("/register");
+
+    let requested = false;
+    page.on("request", (request) => {
+      if (request.url().includes("/api/session/register")) requested = true;
+    });
+
+    await page.getByLabel(/workspace name/i).fill("Acme");
+    await page.getByLabel(/^email/i).fill("someone@example.com");
+    await page.getByLabel(/^password/i).fill("a-long-enough-password");
+    await page.getByLabel(/confirm password/i).fill("a-different-password");
+    await page.getByRole("button", { name: /create workspace/i }).click();
+
+    await expect(page.getByText("The passwords don't match.")).toBeVisible();
+    expect(requested).toBe(false);
+  });
+
   test.describe("with a real account", () => {
     test.skip(!hasCredentials, SKIP_REASON);
 

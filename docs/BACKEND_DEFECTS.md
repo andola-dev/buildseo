@@ -4,10 +4,14 @@ Hand this file to whoever works on
 `claude/saas-link-discovery-backend-768jmc`. Every item below was reproduced
 against a live instance, not inferred from reading code.
 
-> **Status: all seven resolved.** See the "Resolution" section at the end for
-> what changed, plus one further call site this report did not reach. Kept in
-> the repository because the reproduction steps and the root-cause analysis
-> remain the best description of *why* the code is shaped the way it now is.
+> **Status: BE-1 .. BE-7 resolved** (verified against `main` at `8f9bfcd`; see
+> the "Resolution" section for what changed). Kept in the repository because
+> the reproduction steps and the root-cause analysis remain the best
+> description of *why* the code is shaped the way it now is.
+>
+> **BE-8 is open** and was found only after those fixes landed — the RLS
+> deadlock they cured was masking it. It is filed at the end of this file,
+> under "Round two". It currently blocks the end-to-end suite.
 
 Originally filed with nothing fixed and the backend branch untouched — the
 local patches used to confirm the diagnoses were reverted.
@@ -44,6 +48,7 @@ users:               1 row  (owner@example.com)
 | BE-5 | Medium | API design | `/me` and every other endpoint disagree on how the active tenant is determined |
 | BE-6 | Low | Config | `CORS_ORIGINS` rejects the JSON-array form; format is undocumented |
 | BE-7 | Low | Tooling | `scripts/seed.py` documents an `--owner-password` flag that does not exist |
+| **BE-8** | **Blocking** | RBAC / RLS | **OPEN.** `/me` returns `permissions: []` and `roles: []` for a workspace owner |
 
 BE-2, BE-3 and BE-4 are all consequences of BE-1's root cause, but each is a
 separate call site and each needs its own regression test.
@@ -479,3 +484,241 @@ All five the report suggested, plus the refresh case:
   policy itself: unbound sees nothing, a bound user sees only their own rows,
   the policy is SELECT-only, and `set_user_context` does not clear an
   established tenant.
+
+---
+
+# Round two — filed after the BE-1..BE-7 fixes landed
+
+Reproduced against `main` at `8f9bfcd` ("fix: bind the principal before every
+membership read, and test under RLS"), with the same live instance and the same
+NOSUPERUSER NOBYPASSRLS runtime role as above. This defect was not visible
+before, because BE-1 stopped `/me` from resolving an active workspace at all —
+an empty permission set looked like a symptom of BE-1 rather than a second bug
+sitting behind it.
+
+## BE-8 — Blocking: `/me` reports no permissions and no roles, even for an owner
+
+### Symptom
+
+A workspace owner with all 50 permissions gets an empty permission set from the
+one endpoint the client uses to discover what it may do:
+
+```bash
+# 1. plain login (this account belongs to two workspaces, so no tid claim)
+AT=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+      -H 'Content-Type: application/json' \
+      -d '{"email":"owner@example.com","password":"…"}' | jq -r .data.access_token)
+
+# 2. select a workspace — succeeds, and mints a workspace-scoped token
+AT2=$(curl -s -X POST localhost:8000/api/v1/auth/select-tenant \
+      -H "Authorization: Bearer $AT" -H 'Content-Type: application/json' \
+      -d '{"tenant_id":"01a0808f-…-205c6db0ea10"}' | jq -r .data.access_token)
+
+# 3. GET /me with that scoped token
+curl -s localhost:8000/api/v1/me -H "Authorization: Bearer $AT2"
+```
+
+```json
+{
+  "active_tenant_id": "01a0808f-f345-701f-9ede-205c6db0ea10",   ← resolves correctly
+  "tenants": [
+    { "tenant_name": "Acme Marketing", "is_owner": true, "roles": [] },   ← empty
+    { "tenant_name": "Growth Agency",  "is_owner": true, "roles": [] }    ← empty
+  ],
+  "permissions": []                                                      ← empty
+}
+```
+
+The workspace *identity* half of the response is right — `active_tenant_id`,
+`tenant_name`, `tenant_slug`, `status` and `is_owner` are all correct, so this
+is clearly not BE-1 recurring. Only the two RBAC fields are empty.
+
+`GET /api/v1/roles` for the same account and the same workspace is correct,
+which is what makes the diagnosis unambiguous:
+
+```
+[('viewer', 9), ('seo_specialist', 18), ('seo_manager', 34), ('owner', 50), ('admin', 48)]
+```
+
+So the rows exist, the grants exist, and a tenant-scoped endpoint can read
+them. Only `/me` cannot.
+
+### Root cause
+
+`read_me` runs on `UnscopedServicesDep`. By design (see the docstring on
+`TenantAwareSession.set_user_context`) that session has **only**
+`app.current_user_id` bound — `set_user_context` deliberately leaves the tenant
+alone so it can be called at any point in a request without clearing an
+established context. That is the right call for BE-1's fix, and it is exactly
+what breaks here.
+
+`membership_roles` and `role_permissions` are both in
+`migrations/versions/0017_rls_policies.py::TENANT_OWNED_TABLES`, and their only
+policy is:
+
+```sql
+CREATE POLICY <table>_tenant_isolation ON <table>
+    FOR ALL USING (tenant_id = app_current_tenant_id())
+```
+
+With no tenant bound, `app_current_tenant_id()` is NULL, the predicate is never
+true, and both tables read as empty. Unlike `tenant_memberships`, neither has a
+user-keyed escape hatch equivalent to `tenant_memberships_self_read`.
+
+Both of `/me`'s RBAC lookups go through those tables:
+
+| Location | Reads | Result unbound |
+| --- | --- | --- |
+| `app/api/v1/me.py::read_me` → `services.membership_roles.list_roles_for_membership` | `membership_roles` → `roles` | `roles: []` |
+| `app/api/v1/me.py::read_me` → `auth.effective_permissions` → `EffectivePermissionRepository.codes_for_user_in_tenant` | `permissions ⋈ role_permissions ⋈ membership_roles ⋈ tenant_memberships` | `permissions: []` |
+
+Note that `codes_for_user_in_tenant` already constrains `MembershipRole.tenant_id`
+and `RolePermission.tenant_id` in SQL, so the query is correctly scoped on its
+own merits. RLS is filtering rows the query had already narrowed itself — the
+tenant predicate is redundant here, not protective.
+
+### Evidence (database level)
+
+As `buildseo_app` (NOSUPERUSER NOBYPASSRLS), binding exactly what `GET /me`
+binds — the user and nothing else:
+
+```sql
+BEGIN;
+SET LOCAL app.current_user_id = '01a08085-…-e876040d4b02';
+-- deliberately NO app.current_tenant_id, exactly as GET /me runs
+```
+
+```
+role: buildseo_app bypassrls=false
+memberships visible:                                2     ← self_read policy works
+membership_roles visible:                           0     ← tenant predicate, NULL tenant
+role_permissions visible:                           0     ← same
+permissions (global) visible:                      50     ← not tenant-owned
+effective-permission join:                          0     ← the /me result
+```
+
+Then, in the same transaction, adding the tenant the request had already
+resolved:
+
+```sql
+SET LOCAL app.current_tenant_id = '01a0808f-…-205c6db0ea10';
+```
+
+```
+with tenant bound, effective-permission join:      50     ← correct
+```
+
+Nothing about the data or the query changed between those two counts. The only
+variable is whether a tenant is bound.
+
+### Why it matters
+
+`/me.permissions` is the *only* source the client has for what the user may do.
+`GET /roles` describes the workspace's roles, not the caller's grants, and the
+access token deliberately carries no permission claims (the endpoint's own
+description says permissions are "resolved from the database on every call
+rather than read from the token, so a role change is reflected immediately").
+
+An owner therefore lands in a workspace where the frontend can prove no
+capability at all:
+
+- permission-gated navigation renders **only "Dashboard"** — every other
+  section is filtered out by `src/config/navigation.ts`
+- every `<PermissionGate>` action is withheld, so screens reachable by URL
+  render read-only with no primary action
+
+That last point is what fails the E2E suite. `e2e/link-building-workflow.spec.ts`
+reaches `/campaigns`, sees the page render correctly, and then times out
+waiting for the `New campaign` link, which sits behind
+`<PermissionGate permission={PERM.CAMPAIGN_CREATE}>`:
+
+```
+✘ create a campaign through the guided wizard (1.0m)
+  waiting for getByRole('link', { name: /new campaign/i })
+```
+
+Five dependent specs then do not run. The frontend is behaving correctly: it is
+refusing to offer actions the backend says the user does not have. Per §32 the
+frontend must not second-guess a server permission answer, so this cannot be
+worked around client-side, and it should not be.
+
+### Suggested fix
+
+The request has already validated the workspace by the time `/me` needs these
+rows — `active_tenant_id` is resolved and membership-checked a few lines
+earlier. So bind it for the RBAC reads and let RLS agree with the query that is
+already scoped:
+
+```python
+# app/api/v1/me.py::read_me, after active_tenant_id is resolved
+if active_tenant_id is not None:
+    await session.set_tenant_context(
+        tenant_id=active_tenant_id, user_id=principal.user_id
+    )
+```
+
+This is a *validated* tenant, not a claimed one — the `next(...)` above only
+yields a `tenant_id` that appears in this user's own ACTIVE memberships — so it
+grants nothing the caller was not already entitled to.
+
+Three notes on doing it this way:
+
+1. **Do not** reach for a new user-keyed RLS policy on `membership_roles` /
+   `role_permissions`. `tenant_memberships_self_read` is justified because that
+   table must be readable *before* any tenant is known; here the tenant is
+   known, so widening the policy set would trade a precise fix for a permanent
+   hole in the isolation model.
+2. **Do not** use `set_user_context` — it preserves `_tenant_id` precisely so
+   it cannot establish one, which is the whole reason BE-1's fix was safe.
+3. Ordering matters: `roles_by_membership` and `effective_permissions` must
+   both run *after* the bind. The roles comprehension currently sits above the
+   permission lookup and would otherwise still see zero rows.
+
+An alternative, if binding inside `/me` is unwelcome: have `read_me` depend on
+the optional-tenant variant of `get_tenant_context` (validate-and-bind, but
+report `null` instead of raising when the workspace is absent or unenterable),
+so the "discovery endpoint must still answer" property BE-5 established is
+preserved while the session ends up bound the same way every other endpoint
+binds it. That is the tidier shape if more unscoped endpoints ever need
+tenant-owned reads.
+
+### Verification
+
+```bash
+# scoped token, as in the reproduction above
+curl -s localhost:8000/api/v1/me -H "Authorization: Bearer $AT2" \
+  | jq '{active: .data.active_tenant_id, perms: (.data.permissions|length),
+         roles: [.data.tenants[].roles]}'
+```
+
+Expected for the seeded owner:
+
+```json
+{ "active": "01a0808f-…", "perms": 50, "roles": [[], ["owner"]] }
+```
+
+`roles` is empty for the *non*-active workspace by design — `read_me` only
+builds `roles_by_membership` for `active_tenant_id`, with the comment "Role
+names are tenant-owned, so they can only be read for the workspace this request
+is scoped to". That stays true after the fix and is the correct behaviour.
+
+### Suggested regression tests
+
+1. `tests/api/test_bootstrap.py` — after login and select-tenant, `/me` returns
+   a non-empty `permissions` for a seeded owner, and `roles` containing
+   `"owner"` for the active workspace. This is the assertion that would have
+   caught it: the existing bootstrap tests assert `active_tenant_id` resolves,
+   but not that the RBAC fields are populated.
+2. The same, driven by the `X-Tenant-ID` header rather than a scoped token, so
+   the header/claim parity BE-5 established is asserted for the RBAC fields too
+   and not just for `active_tenant_id`.
+3. `tests/security/test_tenant_isolation_rls.py` — a member of two workspaces
+   sees, from `/me`, only the permissions of the *active* one; switching
+   workspace changes the set. This pins the fix as a scoped bind rather than a
+   widened policy: a user-keyed policy on `membership_roles` would return both
+   workspaces' grants and fail this test.
+4. A negative case: `/me` with no workspace resolvable (a user with no
+   memberships, or an `X-Tenant-ID` they do not belong to) still returns `200`
+   with `active_tenant_id: null` and `permissions: []`, and does not raise
+   `TenantContextMissingError`. This is the property that makes `/me` the
+   discovery endpoint, and it is the one most at risk from the fix.
