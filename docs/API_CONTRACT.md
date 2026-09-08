@@ -149,6 +149,11 @@ fetched or offered (spec §73).
 
 ## Blocking backend defect (verified against a live instance)
 
+> The full defect list — seven items with reproduction steps, evidence and
+> suggested fixes, written to be handed to whoever works on the backend branch
+> — is in [`BACKEND_DEFECTS.md`](./BACKEND_DEFECTS.md). This section covers
+> only the one that blocks the frontend outright.
+
 Found by standing the backend up (Postgres 16, all 18 migrations, `scripts.seed`)
 and driving it. **As committed on
 `claude/saas-link-discovery-backend-768jmc`, no tenant-scoped endpoint can

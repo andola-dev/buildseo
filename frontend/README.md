@@ -78,7 +78,7 @@ pre-installed Chromium when the image ships one.
 > empty. The workflow specs therefore cannot pass yet, and `signIn` fails with
 > a message naming the defect so it is not mistaken for a frontend regression.
 > Root cause, evidence and the fix are in
-> [`docs/API_CONTRACT.md`](../docs/API_CONTRACT.md).
+> [`docs/BACKEND_DEFECTS.md`](../docs/BACKEND_DEFECTS.md) (BE-1).
 
 ## Documentation
 
@@ -87,6 +87,9 @@ pre-installed Chromium when the image ships one.
   RBAC/query design, responsive and testing strategy.
 - [`docs/API_CONTRACT.md`](../docs/API_CONTRACT.md) — the verified backend
   contract, the details codegen cannot express, and the known gaps.
+- [`docs/BACKEND_DEFECTS.md`](../docs/BACKEND_DEFECTS.md) — defects found while
+  integrating, with reproduction steps and suggested fixes. Written to be
+  handed to whoever works on the backend.
 
 ## Scope
 
