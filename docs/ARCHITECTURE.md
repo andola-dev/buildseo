@@ -651,7 +651,33 @@ CREATE POLICY memberships_self_access ON tenant_memberships
 ```
 
 Permissive policies OR together: a membership row is visible if it belongs to the
-current tenant **or** to the current user.
+current tenant **or** to the current user. The policy is `SELECT`-only —
+discovering a membership must not mean editing one.
+
+**The policy is inert unless the principal is bound first.** It keys on
+`app_current_user_id()`, so a membership read on a session with no user context
+returns nothing, exactly like a read with no tenant context. Every read of this
+table therefore has to be preceded by a binding, and the reads that decide
+*which* workspace to enter run before any tenant is known — so the binding must
+set the user **without** setting a tenant.
+
+`TenantAwareSession.set_user_context(user_id)` is that primitive. It
+deliberately is not `set_tenant_context(tenant_id=None, user_id=…)`, which
+would bind the user by clearing a tenant already established earlier in the
+request, making the next tenant-scoped read fail `require_tenant_id()`.
+
+Two places call it, which between them cover every path:
+
+| Caller | Why it cannot be left to the other |
+| --- | --- |
+| `get_principal` | Binds once per request, before `get_tenant_context` re-validates membership. FastAPI caches the session per request, so this scopes every later read on it. It cannot live in `get_unscoped_session`, which has no principal yet — the token must be validated first, and the tables that do that (`users`, `refresh_sessions`) are global and readable unbound. |
+| `AuthService._require_membership` | The tenant-authorisation choke point. Login and refresh reach it without any principal dependency having run, so the request layer cannot bind for them. |
+
+Getting this wrong is not a subtle degradation: it is a hard bootstrap
+deadlock. Every tenant-scoped endpoint returns `403 TENANT_ACCESS_DENIED` for a
+legitimate member, while `/me` reports no workspaces — so the caller can
+neither select a workspace nor discover one to select. `tests/api/test_bootstrap.py`
+and `TestMembershipSelfRead` in `tests/security` exist to keep it fixed.
 
 ### 5.5 Deliberately excluded tables
 

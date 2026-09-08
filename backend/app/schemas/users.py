@@ -45,7 +45,12 @@ class MeRead(ReadSchemaBase):
 
     user: UserRead
     active_tenant_id: UUID | None = Field(
-        default=None, description="Workspace the current access token is scoped to"
+        default=None,
+        description=(
+            "Workspace this request resolved to — the `X-Tenant-ID` header if sent, "
+            "otherwise the access token's claim, and null when the caller is not an "
+            "active member of it. Resolved the same way as every other endpoint."
+        ),
     )
     tenants: list[TenantMembershipSummary] = Field(default_factory=list)
     permissions: list[str] = Field(

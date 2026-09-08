@@ -409,3 +409,105 @@ class TestSchemaCoverage:
     async def test_the_model_derived_table_set_is_not_empty(self) -> None:
         # A guard against the audit above passing because it iterated nothing.
         assert len(TENANT_OWNED_TABLES) >= 15
+
+
+class TestMembershipSelfRead:
+    """The bootstrap policy, and the binding it depends on.
+
+    ``tenant_memberships`` is the one tenant-owned table that has to be
+    readable *before* a tenant is chosen — a caller cannot select a workspace
+    without first discovering which ones they belong to. Revision 0017 grants
+    that through ``tenant_memberships_self_read``, a SELECT-only policy keyed
+    on ``app_current_user_id()`` rather than on the tenant.
+
+    A policy nothing activates is the same as no policy. These tests pin both
+    halves: that binding the principal opens the caller's own rows, and that it
+    opens nothing else. ``TenantAwareSession.set_user_context`` exists to do
+    that binding without disturbing a tenant already established, and the
+    application calls it in ``get_principal`` and at the membership choke point
+    in ``AuthService``.
+    """
+
+    async def test_an_unbound_session_sees_no_memberships(
+        self,
+        rls_session_factory: async_sessionmaker[TenantAwareSession],
+        tenant_a: TenantFixture,
+    ) -> None:
+        """Default deny. This is the state that caused the bootstrap deadlock."""
+        async with rls_session_factory() as session:
+            count = (
+                await session.execute(text("SELECT count(*) FROM tenant_memberships"))
+            ).scalar_one()
+            assert count == 0
+
+    async def test_binding_the_user_reveals_their_own_memberships(
+        self,
+        rls_session_factory: async_sessionmaker[TenantAwareSession],
+        tenant_a: TenantFixture,
+    ) -> None:
+        async with rls_session_factory() as session:
+            await session.set_user_context(tenant_a.owner.id)
+            rows = (
+                (await session.execute(text("SELECT tenant_id FROM tenant_memberships")))
+                .scalars()
+                .all()
+            )
+            assert [str(value) for value in rows] == [str(tenant_a.tenant_id)]
+
+    async def test_binding_a_user_reveals_nobody_elses_memberships(
+        self,
+        rls_session_factory: async_sessionmaker[TenantAwareSession],
+        tenant_a: TenantFixture,
+        tenant_b: TenantFixture,
+    ) -> None:
+        """Self-read must not widen into read-every-membership."""
+        async with rls_session_factory() as session:
+            await session.set_user_context(tenant_a.owner.id)
+            rows = (
+                (await session.execute(text("SELECT user_id FROM tenant_memberships")))
+                .scalars()
+                .all()
+            )
+            assert str(tenant_b.owner.id) not in {str(value) for value in rows}
+
+    async def test_binding_the_user_does_not_clear_an_established_tenant(
+        self,
+        rls_session_factory: async_sessionmaker[TenantAwareSession],
+        tenant_a: TenantFixture,
+    ) -> None:
+        """Why ``set_user_context`` exists rather than reusing the other one.
+
+        ``set_tenant_context(tenant_id=None, user_id=...)`` would bind the user
+        by *clearing* the tenant, and the next tenant-scoped read in the same
+        request would then fail ``require_tenant_id()`` — turning a fix for one
+        endpoint into a 400 on another.
+        """
+        async with rls_session_factory() as session:
+            await session.set_tenant_context(
+                tenant_id=tenant_a.tenant_id, user_id=tenant_a.owner.id
+            )
+            await session.set_user_context(tenant_a.owner.id)
+
+            assert session.tenant_id == tenant_a.tenant_id
+            assert session.require_tenant_id() == tenant_a.tenant_id
+            assert await read_tenant_context(session) == (
+                tenant_a.tenant_id,
+                tenant_a.owner.id,
+            )
+
+    async def test_the_self_read_policy_grants_select_only(
+        self,
+        rls_session_factory: async_sessionmaker[TenantAwareSession],
+        tenant_a: TenantFixture,
+    ) -> None:
+        """Discovering a membership must not mean editing one."""
+        async with rls_session_factory() as session:
+            await session.set_user_context(tenant_a.owner.id)
+            result = await session.execute(
+                text("UPDATE tenant_memberships SET is_owner = false WHERE user_id = :uid"),
+                {"uid": str(tenant_a.owner.id)},
+            )
+            # No tenant context, so the FOR ALL isolation policy matches nothing
+            # and the SELECT-only self-read policy cannot authorise a write.
+            assert result.rowcount == 0
+            await session.rollback()

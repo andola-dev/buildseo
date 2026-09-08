@@ -4,8 +4,13 @@ Hand this file to whoever works on
 `claude/saas-link-discovery-backend-768jmc`. Every item below was reproduced
 against a live instance, not inferred from reading code.
 
-**Nothing here has been fixed.** The backend branch is untouched — local
-patches used to confirm the diagnoses were reverted.
+> **Status: all seven resolved.** See the "Resolution" section at the end for
+> what changed, plus one further call site this report did not reach. Kept in
+> the repository because the reproduction steps and the root-cause analysis
+> remain the best description of *why* the code is shaped the way it now is.
+
+Originally filed with nothing fixed and the backend branch untouched — the
+local patches used to confirm the diagnoses were reverted.
 
 ## How this was reproduced
 
@@ -400,3 +405,77 @@ No workarounds and no mock data — the gaps are surfaced honestly instead:
   workflow specs failing today is not mistaken for a frontend regression.
 - `docs/API_CONTRACT.md` records these alongside the seven endpoints the
   frontend needs that the backend does not expose.
+
+---
+
+## Resolution
+
+Fixed on top of the merged backend, in one change per root cause rather than
+one per symptom.
+
+### The root cause, and why it hid
+
+`tenant_memberships` is RLS-protected and `tenant_memberships_self_read` keys
+on `app_current_user_id()`. Nothing bound the principal before a membership
+read, so the policy never activated. This report's diagnosis was correct in
+every particular, including the warning that a naive
+`set_tenant_context(tenant_id=None, …)` patch would clear an established tenant
+and turn the fix into a `400 TENANT_CONTEXT_REQUIRED` elsewhere.
+
+`TenantAwareSession.set_user_context(user_id)` binds the user and leaves
+`_tenant_id` alone, so it is safe to call at any point in a request. It is
+called in exactly two places, which between them cover every path:
+
+- `get_principal` — once per request, before `get_tenant_context` runs. FastAPI
+  caches the session per request, so this scopes every later read on it. It
+  cannot live in `get_unscoped_session`, which has no principal yet: the token
+  must be validated first, and the tables that do so (`users`,
+  `refresh_sessions`) are global and readable unbound.
+- `AuthService._require_membership` — the authorisation choke point, reached by
+  login and refresh without any principal dependency having run.
+
+### A fourth call site this report did not reach
+
+`AuthService.refresh` re-validates the remembered workspace against membership,
+"so a token cannot outlive the access it represents". Unbound, that read saw no
+membership **ever**, so every refresh silently de-scoped a perfectly good
+session — indistinguishable from a genuine revocation, and invisible in the
+logs beyond a line saying the scope was dropped. Now bound before the check.
+
+### Why the test suite did not catch any of it
+
+`tests/fixtures/database.py::resources` built the application container on the
+**owner** engine. That role is a SUPERUSER, which bypasses RLS entirely, so all
+112 API tests exercised every endpoint with Row-Level Security effectively
+switched off — green while the running application was unusable. It now uses
+`rls_engine`; fixtures still *seed* through the owner engine, because setting up
+two tenants' data is not what is under test.
+
+This is the class of failure the CI workflow's "runtime role cannot bypass RLS"
+step was meant to prevent. That step checks the *role*; it could not check that
+the API suite actually *used* it.
+
+### Item by item
+
+| ID | Resolution |
+| --- | --- |
+| BE-1 | `set_user_context`, called at the two sites above. |
+| BE-2 | Same fix — `select_tenant` goes through `_require_membership`. Covered by `test_a_member_can_reach_their_workspace_from_a_plain_login`. |
+| BE-3 | Already correct once BE-1 is fixed: `_resolve_login_tenant` routes an explicit `tenant_id` through `_require_membership`, which raises `TenantAccessError`. The observed `200` + `null` was BE-1 downstream, not a separate silent-drop path. Pinned by `test_an_unowned_workspace_is_rejected_not_silently_dropped` rather than changed speculatively. |
+| BE-4 | Same fix. Covered by `test_a_new_workspace_is_immediately_discoverable`, which also asserts the seeded roles arrive with it. |
+| BE-5 | Resolved in favour of the documented contract: the header wins, falling back to the token claim. `get_requested_tenant_id` is now the single shared rule, used by both `get_tenant_context` and `read_me`, so the two halves cannot drift apart again. `/me` validates the resolved workspace against the caller's own memberships and reports `null` rather than 403 — it is the discovery endpoint, so it must answer even when asked for a workspace the caller cannot enter. The frontend's `select-tenant` bootstrap becomes redundant but stays harmless. |
+| BE-6 | The validator recognised the JSON form and then returned the string unparsed, which failed as "Input should be a valid list" because the field is `NoDecode`. It now parses it, raises a clear error for malformed JSON or a JSON object, and both forms are documented in `.env.example`. |
+| BE-7 | Docstring corrected, and `--owner-email`'s help text now names `SEED_OWNER_PASSWORD` and says why it is deliberately not a flag. |
+
+### Regression tests
+
+All five the report suggested, plus the refresh case:
+
+- `tests/api/test_bootstrap.py` — the end-to-end bootstrap, workspace listing
+  and its isolation, permissions for the active workspace, create-then-select,
+  header/claim parity, the graceful-degradation case, the login contract, and
+  refresh keeping its scope.
+- `tests/security/test_tenant_isolation_rls.py::TestMembershipSelfRead` — the
+  policy itself: unbound sees nothing, a bound user sees only their own rows,
+  the policy is SELECT-only, and `set_user_context` does not clear an
+  established tenant.

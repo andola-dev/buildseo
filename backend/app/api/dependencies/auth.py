@@ -99,6 +99,19 @@ async def get_principal(
 
     # Bind for logging and audit, so every later record carries the actor.
     set_user_id(user.id)
+    # And bind it in PostgreSQL, which is what activates the
+    # ``tenant_memberships_self_read`` RLS policy. Without this, the very next
+    # dependency (``get_tenant_context``) reads that table with
+    # ``app_current_user_id()`` NULL, cannot see the caller's own membership
+    # row, and refuses a legitimate member with 403 TENANT_ACCESS_DENIED —
+    # while ``/me`` reports no workspaces, leaving no way to select one.
+    #
+    # It belongs here rather than in ``get_unscoped_session``, which has no
+    # principal to bind: the token has to be validated first, and the reads
+    # that do that (``users``, ``refresh_sessions``) are global tables outside
+    # RLS, so they work unbound. FastAPI caches the session per request, so
+    # this one call scopes every later read on it.
+    await session.set_user_context(user.id)
     request.state.principal = Principal(user=user, claims=claims)
     return request.state.principal  # type: ignore[no-any-return]
 

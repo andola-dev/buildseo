@@ -50,19 +50,40 @@ class TenantContext:
         return code in self.permissions
 
 
+TenantIdHeader = Annotated[
+    UUID | None,
+    Header(
+        alias="X-Tenant-ID",
+        description=(
+            "Workspace to act in for this request. Overrides the token's claim. "
+            "Membership is validated server-side."
+        ),
+    ),
+]
+
+
+async def get_requested_tenant_id(
+    principal: PrincipalDep, x_tenant_id: TenantIdHeader = None
+) -> UUID | None:
+    """Which workspace this request is *asking* for — header, else token claim.
+
+    Only a request; membership is validated by whoever consumes it. Extracted
+    so that every endpoint resolves the active workspace the same way. ``/me``
+    used to read the token claim alone, so a caller following the documented
+    header contract got ``active_tenant_id: null`` and an empty permission set
+    from ``/me`` while its data requests succeeded — the two halves of the API
+    disagreeing about which workspace the caller was in.
+    """
+    return x_tenant_id or principal.claimed_tenant_id
+
+
+RequestedTenantIdDep = Annotated[UUID | None, Depends(get_requested_tenant_id)]
+
+
 async def get_tenant_context(
     principal: PrincipalDep,
     session: UnscopedSessionDep,
-    x_tenant_id: Annotated[
-        UUID | None,
-        Header(
-            alias="X-Tenant-ID",
-            description=(
-                "Workspace to act in for this request. Overrides the token's claim. "
-                "Membership is validated server-side."
-            ),
-        ),
-    ] = None,
+    requested: RequestedTenantIdDep,
 ) -> TenantContext:
     """Validate membership, then establish the PostgreSQL tenant context.
 
@@ -70,7 +91,6 @@ async def get_tenant_context(
     this request: until it happens, ``app.current_tenant_id`` is NULL and every
     tenant-owned table returns nothing.
     """
-    requested = x_tenant_id or principal.claimed_tenant_id
     if requested is None:
         raise TenantContextMissingError(
             "Select a workspace with POST /api/v1/auth/select-tenant, "

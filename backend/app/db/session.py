@@ -61,6 +61,25 @@ class TenantAwareSession(AsyncSession):
         self._user_id = user_id
         await apply_tenant_context(self, tenant_id=tenant_id, user_id=user_id)
 
+    async def set_user_context(self, user_id: UUID) -> None:
+        """Bind the authenticated principal, leaving any tenant context alone.
+
+        Needed because ``tenant_memberships`` is itself RLS-protected, and the
+        policy that lets a member see their *own* rows
+        (``tenant_memberships_self_read``) tests ``app_current_user_id()``.
+        Every read of that table therefore has to happen with the principal
+        bound — including the reads that decide which workspace to enter, which
+        by definition run before any tenant is known.
+
+        Deliberately **not** ``set_tenant_context(tenant_id=None, user_id=...)``:
+        that would clear a tenant already established earlier in the request,
+        and the next tenant-scoped read would then fail
+        ``require_tenant_id()``. This preserves ``_tenant_id`` and only adds the
+        user, so it is safe to call at any point in a request.
+        """
+        self._user_id = user_id
+        await apply_tenant_context(self, tenant_id=self._tenant_id, user_id=user_id)
+
     def require_tenant_id(self) -> UUID:
         """Return the active tenant, or fail loudly.
 

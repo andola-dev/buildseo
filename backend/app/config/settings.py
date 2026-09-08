@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 from functools import lru_cache
 from typing import Annotated, Any, Literal, Self
 
@@ -140,15 +141,37 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", "trusted_hosts", mode="before")
     @classmethod
     def _split_csv(cls, value: Any) -> Any:
-        """Accept either a JSON array or a comma-separated string."""
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return []
-            if stripped.startswith("["):
-                return value
-            return [item.strip() for item in stripped.split(",") if item.strip()]
-        return value
+        """Accept either a JSON array or a comma-separated string.
+
+        Both forms are supported because both are a reasonable first guess:
+        pydantic-settings normally decodes JSON for complex types, while
+        ``.env`` files are usually written as plain comma-separated lists.
+        These fields are ``NoDecode``, so nothing parses the JSON form for us
+        — this validator has to, and previously returned the raw string,
+        which then failed as "Input should be a valid list" and stopped the
+        application from starting at all.
+        """
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("{"):
+            # Certainly a mistake, and the comma-split below would otherwise
+            # turn it into a nonsense one-element list rather than complaining.
+            raise ValueError("expected a JSON array of strings, not an object")
+        if stripped.startswith("["):
+            try:
+                decoded = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "expected a JSON array of strings or a comma-separated list, "
+                    f"got invalid JSON: {exc.msg}"
+                ) from exc
+            if not isinstance(decoded, list):
+                raise ValueError("expected a JSON array of strings")
+            return [str(item).strip() for item in decoded if str(item).strip()]
+        return [item.strip() for item in stripped.split(",") if item.strip()]
 
     @field_validator("database_url", "database_migration_url")
     @classmethod
