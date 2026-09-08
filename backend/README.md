@@ -194,6 +194,13 @@ a superuser connection would prove nothing.
 
 Markers: `unit`, `integration`, `security`, `api`.
 
+Every branch push runs the same thing in CI
+(`.github/workflows/backend-ci.yml`): a `lint` job for Ruff, Black and MyPy,
+and a `test` job that stands up PostgreSQL 16, creates both roles, runs all
+four suites, and finishes by downgrading every migration back to base. It also
+asserts that `buildseo_app` cannot bypass RLS before running anything — a green
+isolation suite over a privileged role would be a false green.
+
 ---
 
 ## Code quality

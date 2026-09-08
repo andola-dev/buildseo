@@ -1,0 +1,176 @@
+# Backend CI.
+#
+# Two jobs, split so a failure tells you where to look:
+#
+# * `lint` needs no database and finishes in seconds — formatting, linting and
+#   type errors surface before anything slower runs.
+# * `test` brings up PostgreSQL 16 and runs every suite. The schema is built by
+#   running Alembic from empty, so "migrations apply cleanly from scratch" is
+#   asserted on every push rather than being a separate thing to remember.
+#
+# The database setup below mirrors `backend/docker/postgres/init/00-create-app-role.sh`,
+# which the service container cannot run for us. The two roles are the whole
+# point of the RLS design: `buildseo` owns the schema and runs migrations, while
+# the application and every isolation test connect as `buildseo_app`, which is
+# NOSUPERUSER and explicitly NOBYPASSRLS. A superuser bypasses Row-Level
+# Security entirely, so testing isolation over one would prove nothing.
+
+name: backend
+
+# Every branch push, so a feature branch gets a signal without needing a PR.
+# `pull_request` is deliberately omitted: a PR's head branch is already pushed
+# to this repository, so adding it would run every commit twice.
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+# A new push supersedes an in-flight run on the same ref.
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: backend
+
+env:
+  PYTHON_VERSION: "3.12"
+  APP_ENV: test
+  # Test-only values. Both are required for Settings to construct at all, and
+  # neither is a credential for anything: the JWT secret signs tokens that only
+  # exist inside a test run, and the encryption key wraps credentials in a
+  # throwaway database. Real deployments read both from the environment, and
+  # `validate_production_hardening()` refuses to boot on a placeholder.
+  JWT_SECRET: ci-secret-not-used-outside-the-suite-0123456789
+  ENCRYPTION_KEY: Y2ktb25seS1rZXktMzItYnl0ZXMtbG9uZy14eHh4eHg=
+
+jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check --output-format=github .
+
+      - name: Black
+        run: black --check .
+
+      - name: MyPy
+        run: mypy
+
+  test:
+    name: tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # A superuser, and therefore BYPASSRLS. It owns the schema and runs
+          # migrations only; the suites connect as buildseo_app.
+          POSTGRES_USER: buildseo
+          POSTGRES_PASSWORD: buildseo
+          POSTGRES_DB: buildseo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U buildseo -d buildseo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: buildseo
+      PGPASSWORD: buildseo
+      DB_APP_ROLE: buildseo_app
+      TEST_DATABASE_URL: postgresql+asyncpg://buildseo:buildseo@localhost:5432/buildseo_test
+      TEST_APP_DATABASE_URL: postgresql+asyncpg://buildseo_app:buildseo_app@localhost:5432/buildseo_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Create the runtime role and the test database
+        # Mirrors docker/postgres/init/00-create-app-role.sh. The role must
+        # exist before migrations run, because revision 0018 grants table
+        # privileges to it (and skips with a NOTICE if it is absent, which would
+        # leave the suites unable to read anything).
+        run: |
+          psql -v ON_ERROR_STOP=1 -d buildseo <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'buildseo_app') THEN
+              CREATE ROLE buildseo_app LOGIN
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT
+                PASSWORD 'buildseo_app';
+            END IF;
+          END
+          $$;
+          SQL
+
+          createdb -O buildseo buildseo_test
+
+          psql -v ON_ERROR_STOP=1 -d buildseo_test <<'SQL'
+          GRANT CONNECT ON DATABASE buildseo_test TO buildseo_app;
+          GRANT USAGE ON SCHEMA public TO buildseo_app;
+          -- The runtime role must not be able to reshape the schema.
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          SQL
+
+      - name: Assert the runtime role cannot bypass RLS
+        # If this ever passes with rolbypassrls = true, every isolation
+        # assertion in tests/security becomes meaningless. Fail loudly here
+        # rather than reporting a false green later.
+        run: |
+          psql -v ON_ERROR_STOP=1 -d buildseo -t -A -c "
+            SELECT CASE
+              WHEN rolsuper OR rolbypassrls
+                THEN 'FAIL: buildseo_app can bypass RLS'
+              ELSE 'ok'
+            END
+            FROM pg_roles WHERE rolname = 'buildseo_app'" | grep -qx ok
+
+      - name: Unit tests
+        # No database and no web stack, so a failure here is a logic error
+        # rather than a fixture or environment problem.
+        run: pytest tests/unit -q
+
+      - name: Integration, security and API tests
+        run: pytest tests/integration tests/security tests/api -q
+
+      - name: Migrations downgrade cleanly to base
+        # Every revision has a working downgrade, and this is what keeps that
+        # true. Runs last because it destroys the schema the suites built.
+        env:
+          DATABASE_URL: ${{ env.TEST_APP_DATABASE_URL }}
+          DATABASE_MIGRATION_URL: ${{ env.TEST_DATABASE_URL }}
+        run: alembic downgrade base
