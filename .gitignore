@@ -216,3 +216,36 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Frontend (Next.js) workspace
+# ---------------------------------------------------------------------------
+# The Python patterns above are unanchored, so directories such as `lib/`,
+# `build/`, `dist/` and `var/` also match paths inside `frontend/`. Re-include
+# the frontend source tree explicitly (later rules win in .gitignore).
+!frontend/**/lib/
+!frontend/**/build/
+!frontend/**/dist/
+!frontend/**/var/
+!frontend/**/parts/
+!frontend/**/share/
+
+# Node / Next.js build output
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/coverage/
+frontend/.turbo/
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+frontend/.playwright/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+frontend/*.tsbuildinfo
+
+# Local env files (never commit real values)
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/openapi.json
