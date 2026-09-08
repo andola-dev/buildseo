@@ -15,6 +15,7 @@ def _stringify_ip(value: object) -> object:
         return str(value)
     return value
 
+
 #: ISO 3166-1 alpha-2, upper-cased.
 CountryCode = Annotated[
     str,

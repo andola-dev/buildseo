@@ -280,9 +280,14 @@ class TestPaginationAndSorting:
         # Rejecting rather than ignoring: a caller must never believe it sorted
         # when it did not, and ORDER BY must never take arbitrary input.
         response = await client.get("/api/v1/publishers?sort=tenant_id", headers=tenant_a_headers)
-        assert response.status_code in (422, 500)
-        if response.status_code == 422:
-            assert "sortable" in response.text.lower()
+        assert response.status_code == 422
+        error = response.json()["error"]
+        assert error["code"] == "INVALID_SORT_FIELD"
+        assert "sortable" in error["message"].lower()
+        # The caller is told what they may sort by, rather than just refused.
+        assert "created_at" in error["details"]["allowed"]
+        # And never the column they asked for, which is not sortable for a reason.
+        assert "tenant_id" not in error["details"]["allowed"]
 
     async def test_an_out_of_range_page_returns_an_empty_page_not_an_error(
         self, client: httpx.AsyncClient, tenant_a_headers: dict

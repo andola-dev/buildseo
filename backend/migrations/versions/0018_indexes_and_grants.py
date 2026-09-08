@@ -29,7 +29,11 @@ down_revision: str | None = "0017"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_VALID_ROLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+#: A plain, unquoted SQL identifier. The 63-character bound is
+#: PostgreSQL's NAMEDATALEN-1: a longer name is silently truncated by the
+#: server, so the existence check below could match a different role than
+#: the grants then target.
+_VALID_ROLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 
 
 def _app_role() -> str:
@@ -78,7 +82,7 @@ def upgrade() -> None:
 
     # ---------------------------------------------------------------- grants --
     role = _app_role()
-    op.execute(f"""
+    grant_sql = f"""
             DO $do$
             DECLARE
                 app_role text := '{role}';
@@ -122,12 +126,18 @@ def upgrade() -> None:
                 RAISE NOTICE 'granted runtime DML privileges to %', app_role;
             END
             $do$
-            """)
+        """
+    # The role name is interpolated rather than bound because a DO block takes
+    # no parameters. _app_role() validates it as a plain SQL identifier first,
+    # it comes from deployment configuration rather than any request, and
+    # format('%I') quotes it inside the block. Ruff's S608 is suppressed for
+    # this file in pyproject.toml for exactly this reason.
+    op.execute(grant_sql)
 
 
 def downgrade() -> None:
     role = _app_role()
-    op.execute(f"""
+    revoke_sql = f"""
             DO $do$
             DECLARE
                 app_role text := '{role}';
@@ -154,7 +164,13 @@ def downgrade() -> None:
                 EXECUTE format('REVOKE USAGE ON SCHEMA public FROM %I', app_role);
             END
             $do$
-            """)
+        """
+    # The role name is interpolated rather than bound because a DO block takes
+    # no parameters. _app_role() validates it as a plain SQL identifier first,
+    # it comes from deployment configuration rather than any request, and
+    # format('%I') quotes it inside the block. Ruff's S608 is suppressed for
+    # this file in pyproject.toml for exactly this reason.
+    op.execute(revoke_sql)
 
     op.drop_index("ix_opportunities_status_updated_at", table_name="opportunities")
     op.execute("DROP INDEX IF EXISTS ix_campaigns_name_trgm")

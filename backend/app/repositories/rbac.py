@@ -139,10 +139,18 @@ class MembershipRoleRepository(TenantRepository[MembershipRole]):
     ) -> list[Role]:
         """List roles for a membership.
 
-        Callers already scoped to a tenant session can omit ``tenant_id`` and
-        rely on ``self.tenant_id``. ``GET /me`` is not tenant-scoped (a caller
-        may list roles across several of their memberships in one request), so
-        it passes the target membership's tenant explicitly instead.
+        Callers already scoped to a tenant session omit ``tenant_id`` and rely
+        on ``self.tenant_id``. ``GET /me`` is deliberately not tenant-scoped —
+        a user may belong to several workspaces and the endpoint reports across
+        their memberships — so it has no session tenant to derive and passes
+        one explicitly.
+
+        The explicit value **must** be read off a membership row the server
+        already loaded for the authenticated user (as ``GET /me`` does, from
+        ``MembershipRepository.list_for_user``). It must never come from a
+        request: a client-supplied tenant here would defeat the scoping that
+        the rest of this class gets for free from the session. This is the one
+        method with such a parameter, and that is why.
         """
         scope = tenant_id if tenant_id is not None else self.tenant_id
         result = await self.session.execute(

@@ -85,6 +85,11 @@ ignore = [
 "app/core/security/jwt.py" = ["S105"]
 "app/auth/service.py" = ["S105"]
 "scripts/*" = ["T201"]
+# S608 flags the interpolated role name in the grants revision. A DO block
+# cannot take bound parameters, so it has to be interpolated; the value is
+# validated as a plain SQL identifier and comes from deployment config, never
+# from a request. See the comment at the call site.
+"migrations/versions/0018_indexes_and_grants.py" = ["S608"]
 "app/rbac/catalog.py" = ["E501"]
 
 [tool.ruff.lint.isort]

@@ -8,7 +8,7 @@ created.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
@@ -35,7 +35,7 @@ class Base(DeclarativeBase):
     """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
-    __mapper_args__ = {"eager_defaults": True}
+    __mapper_args__: ClassVar[dict[str, Any]] = {"eager_defaults": True}
 
     def __repr__(self) -> str:
         """Identity-only repr. Never dumps column values, which could include

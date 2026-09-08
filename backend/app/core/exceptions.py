@@ -161,6 +161,35 @@ class ValidationError(AppError):
     message = "Request validation failed"
 
 
+class InvalidSortFieldError(ValidationError, ValueError):
+    """A client asked to sort by a field outside the resource's allow-list.
+
+    Deliberately inherits from ``ValueError`` as well. The check happens deep
+    in ``resolve_sort``, called from the repository rather than from a request
+    dependency, so the natural thing for that function to raise is a
+    ``ValueError`` — and callers outside the API (workers, scripts, unit tests)
+    reasonably catch one.
+
+    Inheriting ``AppError`` as well is what keeps that from costing a 500:
+    Starlette resolves a handler by walking ``type(exc).__mro__``, and
+    ``AppError`` sits ahead of ``ValueError`` in this class's MRO, so
+    ``app_error_handler`` claims it and returns the intended 422. The
+    alternative — registering a handler for ``ValueError`` itself — would
+    reclassify *every* unexpected ``ValueError`` in the stack as a client
+    error and echo its text back, hiding real defects behind a 422.
+    """
+
+    code = "INVALID_SORT_FIELD"
+
+    @classmethod
+    def for_field(cls, requested: str, *, allowed: frozenset[str]) -> InvalidSortFieldError:
+        """Build the error, naming the fields the caller may actually use."""
+        return cls(
+            f"'{requested}' is not a sortable field",
+            details={"field": requested, "allowed": sorted(allowed)},
+        )
+
+
 class BusinessRuleError(AppError):
     """A domain invariant was violated (distinct from schema validation)."""
 

@@ -35,8 +35,12 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     reads it would fail.
     """
     transport = httpx.ASGITransport(app=app)
+    # The lifespan is what populates app.state.resources; without driving it,
+    # every dependency that reads the container fails.
     async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as http_client:
             yield http_client
 
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Generic, Literal, TypeVar
 
+from app.core.exceptions import InvalidSortFieldError
+
 T = TypeVar("T")
 
 SortOrder = Literal["asc", "desc"]
@@ -77,12 +79,13 @@ def resolve_sort(
     """Return a safe ``ORDER BY`` column name.
 
     Raises:
-        ValueError: the requested field is not in the resource's allow-list.
-            The API layer turns this into a 422 (see ``value_error_handler``),
-            so a client never believes it sorted when it did not.
+        InvalidSortFieldError: the requested field is not in the resource's
+            allow-list. It is a ``ValueError`` too, so a non-API caller can
+            catch one, while the API returns a 422 naming the permitted
+            fields — a client never believes it sorted when it did not.
     """
     if requested is None:
         return default
     if requested not in allowed:
-        raise ValueError(f"'{requested}' is not a sortable field; allowed: {sorted(allowed)}")
+        raise InvalidSortFieldError.for_field(requested, allowed=allowed)
     return requested
