@@ -169,14 +169,10 @@ class AuthService:
     ) -> TokenPair:
         """Authenticate and issue a token pair."""
         user = await self.authenticate(email=email, password=password)
-        # No tenant is chosen yet, but membership lookup itself reads
-        # tenant_memberships — a tenant-owned, RLS-protected table. Without a
-        # user context, ``app_current_tenant_id()`` and ``app_current_user_id()``
-        # are both NULL, every predicate in the RLS policy evaluates to NULL,
-        # and the row is invisible even to its own owner. Establishing the
-        # user (with no tenant yet) engages the self-read policy so a member
-        # can see which tenants they belong to before one is selected.
-        await self._session.set_tenant_context(tenant_id=None, user_id=user.id)
+        # Bind the principal before any membership read: tenant_memberships is
+        # RLS-protected and its self-read policy tests app_current_user_id(),
+        # so an unbound read cannot see the user's own rows.
+        await self._session.set_user_context(user.id)
         tenant = await self._resolve_login_tenant(user, requested_tenant_id)
         tenant_id = tenant.id if tenant else None
 
@@ -236,7 +232,14 @@ class AuthService:
 
         The single choke point for tenant authorisation. Every path that scopes
         a token or a request to a workspace goes through here.
+
+        Binds the principal first. ``tenant_memberships`` is RLS-protected and
+        the self-read policy tests ``app_current_user_id()``, so an unbound
+        read returns nothing and this method would refuse the user their own
+        workspace. Login and refresh reach here without having gone through
+        ``get_principal``, so the binding cannot be left to the request layer.
         """
+        await self._session.set_user_context(user_id)
         membership = await self._memberships.get_active_for_user_and_tenant(
             user_id=user_id, tenant_id=tenant_id
         )
@@ -351,6 +354,12 @@ class AuthService:
         # Re-validate the remembered workspace: membership may have been
         # revoked since the token was issued, and a token must never outlive
         # the access it represents.
+        #
+        # Bind the principal first, or the read below cannot see the user's own
+        # membership under RLS and *every* refresh would look like a revoked
+        # membership — silently de-scoping a perfectly good session rather than
+        # only the ones that really lost access.
+        await self._session.set_user_context(user.id)
         tenant_id = session_row.active_tenant_id
         if tenant_id is not None:
             membership = await self._memberships.get_active_for_user_and_tenant(

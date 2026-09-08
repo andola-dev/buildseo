@@ -10,11 +10,13 @@ any workspace can be created — ``TenantService.seed_system_roles`` refuses wit
 ``PERMISSION_CATALOG_INCOMPLETE`` if it does not.
 
 **It never seeds a secret.** No API key, no provider credential, no encryption
-key, no default password. The optional ``--owner-email``/``--owner-password``
-bootstrap exists so a fresh deployment has a way in at all; the password is
-read from the environment or prompted for, is validated against the real
-password policy, and is stored only as an Argon2id hash. There is no default
-account and no fallback credential anywhere in this file.
+key, no default password. The optional ``--owner-email`` bootstrap exists so a
+fresh deployment has a way in at all. Its password is **not** a flag — there is
+deliberately no ``--owner-password``, because a password on the command line
+lands in the shell history and the process table. It comes from
+``SEED_OWNER_PASSWORD`` or an interactive prompt, is validated against the same
+policy the API applies, and is stored only as an Argon2id hash. There is no
+default account and no fallback credential anywhere in this file.
 
 Idempotent: run it on every deploy. Existing permissions are updated in place
 if their description changed and left alone otherwise; an existing user or
@@ -157,7 +159,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--owner-email",
-        help="Create this user as the owner of a first workspace, if absent.",
+        help=(
+            "Create this user as the owner of a first workspace, if absent. "
+            "The password is read from SEED_OWNER_PASSWORD, or prompted for; "
+            "it is deliberately not a flag, so it stays out of the shell "
+            "history and the process table."
+        ),
     )
     parser.add_argument(
         "--workspace",

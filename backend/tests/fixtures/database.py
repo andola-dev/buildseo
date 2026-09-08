@@ -130,9 +130,23 @@ async def db_session(
 
 
 @pytest_asyncio.fixture
-async def resources(settings: Settings, engine: AsyncEngine) -> AsyncIterator[AppResources]:
-    """A resource container sharing the suite's engine."""
-    container = build_resources(settings, engine=engine)
+async def resources(settings: Settings, rls_engine: AsyncEngine) -> AsyncIterator[AppResources]:
+    """The container the application runs on, bound to the **runtime** role.
+
+    This is deliberately ``rls_engine``, not ``engine``. The API suite drives
+    the real app through this container, so whichever engine it holds is the
+    one every endpoint queries with. Bound to the owner role — a SUPERUSER,
+    which bypasses Row-Level Security entirely — the whole API suite would
+    pass with RLS effectively switched off, and could not observe a bug in the
+    tenant-context handshake at all. That is exactly what happened: 112 green
+    API tests alongside an app in which every tenant-scoped endpoint returned
+    403 for a legitimate member.
+
+    Fixtures still *seed* through the owner engine (``session_factory``),
+    because setting up two tenants' data is not what is under test. Only the
+    application's own queries go through the confined role.
+    """
+    container = build_resources(settings, engine=rls_engine)
     yield container
     # The engine belongs to the session-scoped fixture, so only the HTTP client
     # is closed here.

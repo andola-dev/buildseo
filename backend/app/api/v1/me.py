@@ -7,6 +7,8 @@ from fastapi import APIRouter
 from app.api.dependencies.auth import PrincipalDep
 from app.api.dependencies.pagination import PageParamsDep, SortParamsDep
 from app.api.dependencies.services import AuthServiceDep, UnscopedServicesDep
+from app.api.dependencies.tenant import RequestedTenantIdDep
+from app.core.enums import MembershipStatus
 from app.core.responses import AUTH_ERROR_RESPONSES, ApiResponse, ok
 from app.schemas.tenants import TenantRead
 from app.schemas.users import (
@@ -36,8 +38,26 @@ async def read_me(
     principal: PrincipalDep,
     services: UnscopedServicesDep,
     auth: AuthServiceDep,
+    requested_tenant_id: RequestedTenantIdDep,
 ) -> ApiResponse[MeRead]:
     memberships = await services.memberships.list_for_user(principal.user_id)
+
+    # The active workspace is resolved exactly as every other endpoint resolves
+    # it (X-Tenant-ID, else the token's claim) — but validated against this
+    # user's own memberships here rather than taken on trust, and reported as
+    # "none" instead of refused. This is the endpoint a client calls to
+    # discover where it can go, so it must answer even when the caller has
+    # asked for a workspace they cannot enter.
+    active_tenant_id = next(
+        (
+            membership.tenant_id
+            for membership in memberships
+            if membership.tenant_id == requested_tenant_id
+            and membership.status == MembershipStatus.ACTIVE.value
+        ),
+        None,
+    )
+
     roles_by_membership = {
         membership.id: [
             role.slug
@@ -48,24 +68,22 @@ async def read_me(
         # Role names are tenant-owned, so they can only be read for the
         # workspace this request is scoped to; other workspaces list as empty.
         for membership in memberships
-        if principal.claimed_tenant_id == membership.tenant_id
+        if membership.tenant_id == active_tenant_id
     }
     summaries: list[TenantMembershipSummary] = await services.user_service.membership_summaries(
         principal.user_id, roles_by_membership=roles_by_membership
     )
 
     permissions: list[str] = []
-    if principal.claimed_tenant_id is not None:
+    if active_tenant_id is not None:
         permissions = sorted(
-            await auth.effective_permissions(
-                user_id=principal.user_id, tenant_id=principal.claimed_tenant_id
-            )
+            await auth.effective_permissions(user_id=principal.user_id, tenant_id=active_tenant_id)
         )
 
     return ok(
         MeRead(
             user=UserRead.model_validate(principal.user),
-            active_tenant_id=principal.claimed_tenant_id,
+            active_tenant_id=active_tenant_id,
             tenants=summaries,
             permissions=permissions,
         )
