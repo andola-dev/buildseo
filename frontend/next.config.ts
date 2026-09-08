@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Emit a self-contained server (.next/standalone) so the Docker runtime
+  // image ships only the modules the app actually imports.
+  output: "standalone",
   typedRoutes: false,
   experimental: {
     optimizePackageImports: ["lucide-react", "date-fns"],

@@ -1,9 +1,10 @@
 # Local development stack.
 #
-# Two services today (backend + postgres). The commented worker and redis
-# blocks are the intended growth path: the worker runs the same image with a
-# different command, and Redis would back the shared rate limiter and, later, a
-# distributed task queue. Nothing in the application needs to change for either.
+# Three services today (postgres + backend + frontend). The commented worker
+# and redis blocks are the intended growth path: the worker runs the same image
+# with a different command, and Redis would back the shared rate limiter and,
+# later, a distributed task queue. Nothing in the application needs to change
+# for either.
 
 name: buildseo
 
@@ -55,6 +56,28 @@ services:
       sh -c "alembic upgrade head &&
              python -m scripts.seed &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --no-access-log"
+
+  frontend:
+    build:
+      context: ../frontend
+      target: runtime
+      args:
+        # Inlined into the browser bundle at build time: this is how the
+        # *browser* reaches the API, so it is the host-published backend port,
+        # not the compose service name. Changing it requires a rebuild.
+        NEXT_PUBLIC_API_URL: ${FRONTEND_PUBLIC_API_URL:-http://localhost:${API_PORT:-8000}}
+        NEXT_PUBLIC_APP_NAME: ${FRONTEND_APP_NAME:-BuildSEO}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # Server-side calls (the session login/refresh/logout route handlers) run
+      # inside the compose network and reach the backend by service name.
+      API_URL: http://backend:8000
+      PORT: 5175
+    ports:
+      - "${FRONTEND_PORT:-5175}:5175"
 
   # Background worker: same image, same code, different entrypoint. Enable once
   # discovery/qualification/verification jobs are being enqueued.
