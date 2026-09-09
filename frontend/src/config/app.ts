@@ -6,27 +6,36 @@
  * (spec §48/§58).
  */
 
-function readPublic(name: string, fallback: string): string {
-  const value = process.env[name];
+/**
+ * Use a configured value, or the fallback when it is unset or blank.
+ *
+ * Callers MUST pass the variable as a direct member access
+ * (`process.env.NEXT_PUBLIC_X`), never as `process.env[name]`. Next.js inlines
+ * public variables into the browser bundle at build time by textually
+ * replacing exactly those direct accesses; a computed lookup is invisible to
+ * that step, resolves to `undefined` in the browser, and silently pins the
+ * app to the fallback no matter how it was built.
+ */
+function readPublic(value: string | undefined, fallback: string): string {
   return value && value.length > 0 ? value : fallback;
 }
 
 /** Origin of the FastAPI service, without a trailing slash. */
 export const API_ORIGIN = readPublic(
-  "NEXT_PUBLIC_API_URL",
+  process.env.NEXT_PUBLIC_API_URL,
   "http://localhost:8000",
 ).replace(/\/+$/, "");
 
 /** Versioned API base path. Every resource module builds on this. */
 export const API_BASE_URL = `${API_ORIGIN}/api/v1`;
 
-export const APP_NAME = readPublic("NEXT_PUBLIC_APP_NAME", "BuildSEO");
+export const APP_NAME = readPublic(process.env.NEXT_PUBLIC_APP_NAME, "BuildSEO");
 
 export const APP_DESCRIPTION =
   "Discover, qualify and submit links to free online listing and directory sites.";
 
 export const API_TIMEOUT_MS = Number.parseInt(
-  readPublic("NEXT_PUBLIC_API_TIMEOUT_MS", "30000"),
+  readPublic(process.env.NEXT_PUBLIC_API_TIMEOUT_MS, "30000"),
   10,
 );
 

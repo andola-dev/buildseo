@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.dependencies.auth import PrincipalDep
+from app.api.dependencies.db import UnscopedSessionDep
 from app.api.dependencies.pagination import PageParamsDep, SortParamsDep
 from app.api.dependencies.services import AuthServiceDep, UnscopedServicesDep
 from app.api.dependencies.tenant import RequestedTenantIdDep
@@ -36,6 +37,7 @@ router = APIRouter(tags=["Users"])
 )
 async def read_me(
     principal: PrincipalDep,
+    session: UnscopedSessionDep,
     services: UnscopedServicesDep,
     auth: AuthServiceDep,
     requested_tenant_id: RequestedTenantIdDep,
@@ -57,6 +59,18 @@ async def read_me(
         ),
         None,
     )
+
+    if active_tenant_id is not None:
+        # Role assignments and role grants are tenant-owned tables behind
+        # Row-Level Security, and the policies compare against
+        # ``app.current_tenant_id``. This endpoint runs on the unscoped session,
+        # so without this handshake the role and permission reads below are
+        # legal SQL that PostgreSQL silently answers with zero rows — a brand
+        # new owner saw ``roles: []`` and ``permissions: []`` and the UI hid
+        # every feature. Binding here is safe: the id was just validated against
+        # the caller's own ACTIVE memberships, exactly as ``get_tenant_context``
+        # does before it binds.
+        await session.set_tenant_context(tenant_id=active_tenant_id, user_id=principal.user_id)
 
     roles_by_membership = {
         membership.id: [
